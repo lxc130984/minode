@@ -144,10 +144,18 @@ body {
 .sortable-chosen {
   cursor: grabbing;
 }
-.sortable-drag {
-  box-shadow: 0 10px 28px rgba(50, 80, 50, 0.22) !important;
-  border-radius: 8px;
+/* 虚影(拖拽跟随体):裁剪到单行高度,不把整棵子树带上挡视线 */
+.node-wrap.sortable-drag,
+.node-wrap.sortable-fallback {
+  max-height: calc(var(--row-h) + 6px);
   overflow: hidden;
+  border-radius: 8px;
+  box-shadow: 0 8px 22px rgba(50, 80, 50, 0.25);
+  opacity: 0.88;
+}
+.sortable-drag {
+  box-shadow: 0 8px 22px rgba(50, 80, 50, 0.25) !important;
+  border-radius: 8px;
 }
 
 /* ── 触发动态效果 ────────────────────────────────────── */

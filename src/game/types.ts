@@ -3,8 +3,37 @@
  * 一切游玩元素皆节点:世界树、背包、物品栏,全部是同一形态的节点。
  */
 
-/** 节点/物品类别 */
-export type Category = "terrain" | "tool" | "material" | "special"
+/** 节点显示分类 */
+export type Category = "terrain" | "material" | "tool" | "functional"
+
+/**
+ * 功能节点行为:声明式描述"点击这个节点会发生什么"。
+ * 引擎按 kind 分发,新增行为只需扩展此联合类型并在 store 注册分发分支。
+ */
+export interface ExploreBehavior {
+  kind: "explore"
+  /** 探索耗时(ms) */
+  durationMs: number
+  /** 成功概率 0~1 */
+  successRate: number
+  /** 产出池:按权重随机生成到自身子级 */
+  pool: Array<{ type: string; weight: number }>
+}
+
+export interface CraftBehavior {
+  kind: "craft"
+  /** 按当前选中配方,检测自身子级挂载的材料进行合成 */
+}
+
+/** 工厂行为(预留):周期性把输入转换为输出 */
+export interface FactoryBehavior {
+  kind: "factory"
+  inputs: string[]
+  outputs: string[]
+  intervalMs: number
+}
+
+export type NodeBehavior = ExploreBehavior | CraftBehavior | FactoryBehavior
 
 /** 节点类型定义(注册表条目) */
 export interface NodeDef {
@@ -13,13 +42,17 @@ export interface NodeDef {
   /** 显示名,如 "森林" */
   name: string
   category: Category
-  /** lucide 图标组件名(在 registry 中统一映射) */
+  /** lucide 图标组件名(在 registry 的 ICONS 中映射) */
   icon: string
   desc: string
-  /** 地形节点只能存在于世界树中 */
-  terrain?: boolean
-  /** 特殊节点(探索/手工合成):世界自带、不可收纳、不可移除 */
-  special?: boolean
+  /** 视觉主色(css color):图标与名称着色,自定义材质/外观的入口 */
+  accent?: string
+  /** 只能存在于世界面板(地形、探索等) */
+  worldOnly?: boolean
+  /** 永久节点:不可被移除、不可凭空消失(探索、手工合成) */
+  permanent?: boolean
+  /** 功能节点行为 */
+  behavior?: NodeBehavior
 }
 
 /** 节点实例:世界树 / 背包 / 物品栏通用 */
