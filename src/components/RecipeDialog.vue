@@ -17,18 +17,32 @@ const list = computed(() =>
     return { recipe, inputs, craftable: inputs.every((i) => i.ok) }
   }),
 )
+
+/** 配方按分类分组(无分类的归入"基础") */
+const groups = computed(() => {
+  const map = new Map<string, typeof list.value>()
+  for (const item of list.value) {
+    const key = item.recipe.category ?? "基础"
+    const arr = map.get(key) ?? []
+    arr.push(item)
+    map.set(key, arr)
+  }
+  return Array.from(map.entries())
+})
 </script>
 
 <template>
   <div class="recipe-list">
     <p class="hint">选择「手工合成」节点使用的配方。点击合成节点时,会检测它下方挂载的材料。</p>
-    <button
-      v-for="item in list"
-      :key="item.recipe.id"
-      class="recipe-card"
-      :class="{ active: game.selectedRecipeId === item.recipe.id }"
-      @click="game.selectRecipe(item.recipe.id)"
-    >
+    <template v-for="[group, items] in groups" :key="group">
+      <div v-if="groups.length > 1" class="group-label">{{ group }}</div>
+      <button
+        v-for="item in items"
+        :key="item.recipe.id"
+        class="recipe-card"
+        :class="{ active: game.selectedRecipeId === item.recipe.id }"
+        @click="game.selectRecipe(item.recipe.id)"
+      >
       <div class="io-row">
         <div class="io-group">
           <span v-for="inp in item.inputs" :key="inp.stack.type" class="io-item">
@@ -48,7 +62,8 @@ const list = computed(() =>
       <span v-if="game.selectedRecipeId === item.recipe.id" class="picked">
         <Check :size="13" /> 当前配方
       </span>
-    </button>
+      </button>
+    </template>
   </div>
 </template>
 
@@ -57,6 +72,13 @@ const list = computed(() =>
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.group-label {
+  font-size: 10px;
+  color: var(--fg-faint);
+  letter-spacing: 0.15em;
+  padding: 6px 2px 0;
+  font-family: var(--mono);
 }
 .hint {
   margin: 0 0 4px;

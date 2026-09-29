@@ -2,11 +2,12 @@
  * 拖拽系统:SortableJS 分组守卫 + 落库整理。
  *
  * 世界树 / 背包树 / 物品栏 都是 GameNode 列表,跨区拖拽就是移动节点本身。
- * 需要处理的只有:
- *   - 守卫:地形/特殊节点不可离开世界(board ≠ world 的列表一律拒绝);
+ * 规则:
+ *   - 守卫:节点能否进入某区域由 registry 的 zones 权限决定;
  *          不可把节点拖进自己所在面板的子树(防环)。
- *   - 落库整理:同级同堆合并、物品栏超格溢出、带子树的节点进储区时释放子树。
- * 整理一律延迟到 setTimeout(0),避免与 Sortable 落盘序列竞争。
+ *   - 语义:拖进"世界"= 放置,材料堆一次只放一个(余量退回储区);
+ *          储区之间(物品栏↔背包)= 整堆搬运。
+ *   - 整理延迟到 setTimeout(0),避免与 Sortable 落盘序列竞争。
  */
 import type { SortableEvent } from "sortablejs"
 import type { BoardId } from "../stores/game"
@@ -23,7 +24,7 @@ export function storageGroup() {
     name: DND_GROUP,
     pull: true,
     put: (_to: unknown, _from: unknown, dragEl: HTMLElement) =>
-      useGameStore().canEnterStorage(dragEl),
+      useGameStore().canEnterZone(dragEl, "hotbar"),
   }
 }
 
@@ -47,9 +48,9 @@ export function setDragging(v: boolean) {
 
 /**
  * 面板树列表 @add:
- * - 物品从储区拖进世界时提示一句;
- * - 挂上子节点时自动展开(默认折叠的节点获得可见的子树);
- * - 落进背包(任意层级)时延迟整理。
+ * - 储区 → 世界:材料堆按"放置"语义拆成 1 个(延迟结算);
+ * - 储区 → 任意面板:提示一句;挂上子节点时自动展开;
+ * - 落进背包(任意层级):延迟整理(子树释放/同级合并)。
  */
 export function onTreeAdd(
   board: BoardId,
@@ -62,13 +63,18 @@ export function onTreeAdd(
   if (!dropped) return
   const game = useGameStore()
   const fromZone = evt.from?.dataset?.zone
+  const fromStorage = fromZone === "hotbar" || fromZone === "backpack"
 
-  if (board === "world" && (fromZone === "hotbar" || fromZone === "backpack")) {
+  if (board === "world" && fromStorage) {
     game.pushLog(`「${getDef(dropped.type).name}」被放置进了世界。`, "info")
   }
   if (owner?.collapsed) owner.collapsed = false
-  if (board === "backpack" && fromZone !== "backpack") {
-    const target = dropped
+
+  const target = dropped
+  if (board === "world" && fromStorage) {
+    const zone = fromZone as "hotbar" | "backpack"
+    setTimeout(() => game.settleWorldDrop(target, zone), 0)
+  } else if (board === "backpack" && fromZone !== "backpack") {
     setTimeout(() => game.settleStorageDrop("backpack", list, target), 0)
   }
 }
@@ -82,14 +88,19 @@ export function onHotbarAdd(evt: SortableEvent) {
   setTimeout(() => game.settleStorageDrop("hotbar", game.hotbar, dropped), 0)
 }
 
-/** 树/储区通用拖拽手感 */
+/**
+ * 拖拽跟随虚影完全交给 SortableJS 的 fallback 机制(官方实现,触屏同款):
+ * forceFallback 统一桌面/移动行为,库自己克隆元素、跟随指针;
+ * 我们只通过 CSS(.sortable-fallback)微调宽度与观感,不自己造轮子。
+ */
 export const DND_COMMON = {
   animation: 150,
+  forceFallback: true,
+  fallbackOnBody: true,
+  fallbackTolerance: 3,
   // 触屏:按住 150ms 才进入拖拽,避免和点击/滚动冲突
-  // (触屏设备自动走 fallback 模式,不需要 forceFallback)
   delay: 150,
   delayOnTouchOnly: true,
-  fallbackOnBody: true,
   swapThreshold: 0.55,
   emptyInsertThreshold: 12,
 } as const

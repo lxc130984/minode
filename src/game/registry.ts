@@ -1,6 +1,7 @@
 /**
  * 游戏内容注册表:节点类型、交互规则、合成配方。
- * 新内容只需要在这里追加定义,界面与引擎自动生效。
+ * 新内容只需在这里(或通过 game/api.ts 运行时注册)追加定义,
+ * 界面与引擎自动生效。
  */
 import type { Component } from "vue"
 import {
@@ -14,9 +15,9 @@ import {
   Compass,
   Soup,
 } from "lucide-vue-next"
-import type { Interaction, NodeDef, Recipe } from "./types"
+import type { Interaction, NodeDef, NodeZone, Recipe } from "./types"
 
-/** lucide 图标映射 */
+/** lucide 图标映射(自定义节点可通过 api.registerIcon 追加) */
 export const ICONS: Record<string, Component> = {
   forest: TreePine,
   river: Waves,
@@ -29,38 +30,54 @@ export const ICONS: Record<string, Component> = {
   bench: Soup,
 }
 
-/** 全部节点/物品类型定义 */
+/** 全部节点类型定义 */
 export const NODE_DEFS: NodeDef[] = [
   {
     id: "explorer",
     name: "探索",
-    category: "special",
-    special: true,
+    category: "functional",
     icon: "explorer",
-    desc: "点击它,等上 5 秒——有几率在它下面发现一片新的地形。它是世界的一部分,无法收进背包。",
+    worldOnly: true,
+    permanent: true,
+    accent: "#d08a3e",
+    desc: "点击它,等上几秒——有几率在它下面发现一片新的地形。它是世界的一部分,无法收进背包。",
+    behavior: {
+      kind: "explore",
+      durationMs: 5000,
+      successRate: 0.65,
+      pool: [
+        { type: "forest", weight: 0.65 },
+        { type: "river", weight: 0.35 },
+      ],
+    },
   },
   {
     id: "bench",
     name: "手工合成",
-    category: "special",
-    special: true,
+    category: "functional",
     icon: "bench",
-    desc: "把材料节点挂到它下面,点击它就会按当前配方合成。点击行尾的调校按钮可以更换配方。",
+    permanent: true,
+    zones: ["world", "backpack"],
+    accent: "#8672bd",
+    desc: "把材料节点挂到它下面,点击它就会按当前配方合成,产物自动进背包。它天然生成在背包里,方便整堆挂料、批量合成。",
+    behavior: { kind: "craft" },
   },
   {
     id: "forest",
     name: "森林",
     category: "terrain",
-    terrain: true,
     icon: "forest",
+    worldOnly: true,
+    accent: "#3d8b57",
     desc: "一片郁郁葱葱的森林。空手翻找可以捡到木棍和石子;把石斧挂在它上面就能砍到木头。",
   },
   {
     id: "river",
     name: "河流",
     category: "terrain",
-    terrain: true,
     icon: "river",
+    worldOnly: true,
+    accent: "#2f8f96",
     desc: "一条潺潺流淌的河。河滩上散落着被水冲刷圆润的石子。",
   },
   {
@@ -89,6 +106,7 @@ export const NODE_DEFS: NodeDef[] = [
     name: "石斧",
     category: "tool",
     icon: "stoneAxe",
+    accent: "#8672bd",
     desc: "石头绑上木棍制成的斧头。把它拖到世界,再把森林挂在它下面,点击它就会砍伐森林。",
   },
 ]
@@ -97,20 +115,37 @@ export const DEF_MAP: Record<string, NodeDef> = Object.fromEntries(
   NODE_DEFS.map((d) => [d.id, d]),
 )
 
-export const getDef = (type: string): NodeDef =>
-  DEF_MAP[type] ?? {
-    id: type,
-    name: type,
-    category: "material",
-    icon: "hand",
-    desc: "未知的节点。",
-  }
+const ALL_ZONES: NodeZone[] = ["world", "backpack", "hotbar"]
 
-export const isTerrain = (type: string): boolean => !!DEF_MAP[type]?.terrain
-export const isSpecial = (type: string): boolean => !!DEF_MAP[type]?.special
-/** 无法收进物品栏/背包的节点(地形与特殊节点) */
-export const isLockedToWorld = (type: string): boolean =>
-  !!DEF_MAP[type]?.terrain || !!DEF_MAP[type]?.special
+export function getDef(type: string): NodeDef {
+  return (
+    DEF_MAP[type] ?? {
+      id: type,
+      name: type,
+      category: "material",
+      icon: "hand",
+      desc: "未知的节点。",
+      zones: ALL_ZONES,
+    }
+  )
+}
+
+/** 节点允许存在的区域 */
+export function zonesOf(type: string): NodeZone[] {
+  const def = DEF_MAP[type]
+  if (!def) return ALL_ZONES
+  if (def.zones) return def.zones
+  if (def.worldOnly) return ["world"]
+  return ALL_ZONES
+}
+
+/** 节点能否进入某区域 */
+export function canPlaceInZone(type: string, zone: NodeZone): boolean {
+  return zonesOf(type).includes(zone)
+}
+
+/** 永久节点(不可移除) */
+export const isPermanent = (type: string): boolean => !!DEF_MAP[type]?.permanent
 
 /** 交互规则表:source(来源) + target(目标) => 产出 */
 export const INTERACTIONS: Interaction[] = [
@@ -183,6 +218,7 @@ export const INTERACTIONS: Interaction[] = [
 const INTERACTION_MAP: Record<string, Interaction> = Object.fromEntries(
   INTERACTIONS.map((i) => [`${i.source}>${i.target}`, i]),
 )
+export { INTERACTION_MAP }
 
 export function findInteraction(source: string, target: string): Interaction | undefined {
   return INTERACTION_MAP[`${source}>${target}`]
@@ -192,6 +228,7 @@ export function findInteraction(source: string, target: string): Interaction | u
 export const RECIPES: Recipe[] = [
   {
     id: "stone-axe",
+    category: "石器",
     inputs: [
       { type: "stone", count: 3 },
       { type: "stick", count: 2 },
@@ -203,17 +240,6 @@ export const RECIPES: Recipe[] = [
 export const getRecipe = (id: string): Recipe | undefined =>
   RECIPES.find((r) => r.id === id)
 
-/** 探索生成地形的权重(forest 优先) */
-export const EXPLORE_POOL: Array<{ type: string; weight: number }> = [
-  { type: "forest", weight: 0.65 },
-  { type: "river", weight: 0.35 },
-]
-
-/** 探索参数 */
-export const EXPLORE_MS = 5000
-/** 探索成功概率 */
-export const EXPLORE_SUCCESS_RATE = 0.65
-
 /** 掷骰:按顺序判定,首个命中的掉落生效 */
 export function rollDrops(interaction: Interaction): { type: string; count: number }[] {
   for (const entry of interaction.results) {
@@ -224,13 +250,13 @@ export function rollDrops(interaction: Interaction): { type: string; count: numb
   return []
 }
 
-/** 按权重随机选一个探索地形 */
-export function rollTerrain(): string {
-  const r = Math.random()
-  let acc = 0
-  for (const item of EXPLORE_POOL) {
-    acc += item.weight
-    if (r < acc) return item.type
+/** 按权重随机选取 */
+export function rollPool(pool: Array<{ type: string; weight: number }>): string {
+  const total = pool.reduce((s, p) => s + p.weight, 0)
+  let r = Math.random() * total
+  for (const item of pool) {
+    r -= item.weight
+    if (r < 0) return item.type
   }
-  return EXPLORE_POOL[0]?.type ?? "forest"
+  return pool[0]?.type ?? "forest"
 }

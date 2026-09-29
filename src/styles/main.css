@@ -144,18 +144,22 @@ body {
 .sortable-chosen {
   cursor: grabbing;
 }
-/* 虚影(拖拽跟随体):裁剪到单行高度,不把整棵子树带上挡视线 */
-.node-wrap.sortable-drag,
-.node-wrap.sortable-fallback {
-  max-height: calc(var(--row-h) + 6px);
+/*
+ * SortableJS fallback 虚影(库官方克隆,跟随指针):
+ * 仅做轻量微调 —— 比面板行略窄、隐藏子树、轻微透明,不挡视线。
+ */
+.sortable-fallback {
+  width: min(70vw, 320px) !important;
+  height: auto !important;
+  opacity: 0.92;
+  border-radius: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 22px rgba(50, 80, 50, 0.22);
   overflow: hidden;
-  border-radius: 8px;
-  box-shadow: 0 8px 22px rgba(50, 80, 50, 0.25);
-  opacity: 0.88;
 }
-.sortable-drag {
-  box-shadow: 0 8px 22px rgba(50, 80, 50, 0.25) !important;
-  border-radius: 8px;
+.sortable-fallback .child-list {
+  display: none !important;
 }
 
 /* ── 触发动态效果 ────────────────────────────────────── */

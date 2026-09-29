@@ -6,6 +6,9 @@
 /** 节点显示分类 */
 export type Category = "terrain" | "material" | "tool" | "functional"
 
+/** 节点可以存在的区域(面板/储区) */
+export type NodeZone = "world" | "backpack" | "hotbar"
+
 /**
  * 功能节点行为:声明式描述"点击这个节点会发生什么"。
  * 引擎按 kind 分发,新增行为只需扩展此联合类型并在 store 注册分发分支。
@@ -49,6 +52,12 @@ export interface NodeDef {
   accent?: string
   /** 只能存在于世界面板(地形、探索等) */
   worldOnly?: boolean
+  /**
+   * 允许存在的区域(细粒度覆盖 worldOnly):
+   * 如手工合成 zones: ["world","backpack"] 表示可在世界与背包间移动,但不进物品栏。
+   * 缺省:worldOnly → 仅世界;否则全区域。
+   */
+  zones?: NodeZone[]
   /** 永久节点:不可被移除、不可凭空消失(探索、手工合成) */
   permanent?: boolean
   /** 功能节点行为 */
@@ -92,6 +101,8 @@ export interface Interaction {
 /** 合成配方 */
 export interface Recipe {
   id: string
+  /** 配方分类(配方多了以后分组显示) */
+  category?: string
   inputs: ItemStack[]
   output: ItemStack
 }
@@ -112,3 +123,11 @@ export const isGameNode = (v: unknown): v is GameNode =>
 /** 节点的有效数量(材料堆按 count,单件按 1) */
 export const nodeCount = (n: GameNode): number =>
   typeof n.count === "number" && n.count > 0 ? n.count : 1
+
+/** 分类的默认标签 */
+export const CATEGORY_LABELS: Record<Category, string> = {
+  terrain: "地形",
+  material: "资源",
+  tool: "工具",
+  functional: "功能",
+}

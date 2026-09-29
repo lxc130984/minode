@@ -5,6 +5,7 @@ import { ChevronRight, Settings2, Ellipsis } from "lucide-vue-next"
 import { DND_COMMON, onTreeAdd, setDragging, treeGroup } from "../game/dnd"
 import { getDef, getRecipe } from "../game/registry"
 import type { GameNode } from "../game/types"
+import { CATEGORY_LABELS } from "../game/types"
 import type { BoardId } from "../stores/game"
 import { useGameStore } from "../stores/game"
 import { useUiStore } from "../stores/ui"
@@ -33,19 +34,17 @@ const benchRecipeName = computed(() => {
   return r ? getDef(r.output.type).name : "未选择"
 })
 
-const catLabel = computed(
-  () =>
-    ({
-      terrain: "地形",
-      tool: "工具",
-      material: "材料",
-      special: "特殊",
-    })[def.value.category],
-)
+const catLabel = computed(() => CATEGORY_LABELS[def.value.category])
+/** 功能节点带行为(探索/合成等),在任何面板都可点击触发 */
+const isFunctional = computed(() => !!def.value.behavior)
 
-/** 世界面板:点击 = 触发;背包面板:点击 = 仅选中 */
+/**
+ * 点击行为:功能节点(按 behavior 分发)任何面板都触发;
+ * 普通节点只在"世界"里触发(父触发子/空手),背包里仅选中。
+ */
 function onRowClick() {
-  if (props.board === "world") {
+  const clickable = isFunctional.value || props.board === "world"
+  if (clickable) {
     game.clickNode(props.node.id)
     fx.value = false
     requestAnimationFrame(() => {
@@ -77,7 +76,8 @@ function openRecipe() {
   >
     <div
       class="row-main"
-      :class="{ selected, 'trigger-fx': fx, special: def.special }"
+      :class="{ selected, 'trigger-fx': fx, functional: isFunctional }"
+      :style="def.accent ? { '--node-accent': def.accent } : undefined"
       @click="onRowClick"
     >
       <button
@@ -89,12 +89,14 @@ function openRecipe() {
         <ChevronRight :size="13" :class="{ rotated: !node.collapsed }" />
       </button>
       <NodeIcon :type="node.type" :size="16" />
-      <span class="nt-name">{{ def.name }}</span>
+      <span class="nt-name" :style="def.accent ? { color: def.accent } : undefined">
+        {{ def.name }}
+      </span>
       <span v-if="node.type === 'bench'" class="nt-sub">配方 · {{ benchRecipeName }}</span>
       <span v-if="node.type === 'explorer' && game.exploring" class="nt-sub exploring">
         {{ game.exploreCdLeft }}s
       </span>
-      <span v-else-if="def.category !== 'special'" class="nt-cat" :class="`cat-${def.category}`">
+      <span v-else-if="!isFunctional" class="nt-cat" :class="`cat-${def.category}`">
         {{ catLabel }}
       </span>
       <span class="nt-fill" />
@@ -174,7 +176,7 @@ function openRecipe() {
   background: var(--accent-soft);
   border-left-color: var(--accent);
 }
-.row-main.special .nt-name {
+.row-main.functional .nt-name {
   font-weight: 600;
 }
 
@@ -278,7 +280,7 @@ function openRecipe() {
   }
 }
 
-/* 子列表缩进 + org 引导线 */
+/* 子列表缩进 + org 引导线(空列表不画线,避免残留的短竖线) */
 .child-list {
   list-style: none;
   margin: 0;
@@ -288,6 +290,8 @@ function openRecipe() {
 }
 .child-list.is-empty {
   min-height: 8px;
+  border-left-color: transparent;
+  padding-left: 0;
 }
 /* 拖拽时,空子列表成为可见投放区,且向上咬合父行下半部分 */
 .app.dragging .child-list.is-empty {

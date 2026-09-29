@@ -6,15 +6,14 @@
 import { defineStore } from "pinia"
 import { ref } from "vue"
 import {
-  EXPLORE_MS,
-  EXPLORE_SUCCESS_RATE,
   RECIPES,
+  canPlaceInZone,
   findInteraction,
   getDef,
   getRecipe,
-  isLockedToWorld,
+  isPermanent,
   rollDrops,
-  rollTerrain,
+  rollPool,
 } from "../game/registry"
 import type { GameNode, LogEntry, LogKind } from "../game/types"
 import { nodeCount as pileCount } from "../game/types"
@@ -23,7 +22,7 @@ import { countNodes, findNode, isAncestorOf, removeNode } from "../game/tree"
 export const HOTBAR_SLOTS = 10
 const LOG_LIMIT = 200
 /** 存档结构版本:不匹配时自动开新档 */
-export const SAVE_VERSION = 3
+export const SAVE_VERSION = 4
 /** 存档在 localStorage 里的 key(与 persist 配置共用) */
 export const SAVE_KEY = "game"
 
@@ -68,13 +67,10 @@ interface GameState {
 function freshState(): GameState {
   return {
     version: SAVE_VERSION,
-    // 每个世界自带:探索 + 手工合成
-    nodes: [
-      { id: "n1", type: "explorer", children: [], collapsed: true },
-      { id: "n2", type: "bench", children: [], collapsed: true },
-    ],
+    // 每个世界自带:探索(在世界) + 手工合成(在背包,方便批量挂料合成)
+    nodes: [{ id: "n1", type: "explorer", children: [], collapsed: true }],
     hotbar: [],
-    backpack: [],
+    backpack: [{ id: "n2", type: "bench", children: [], collapsed: true }],
     selectedRecipeId: RECIPES[0]?.id ?? "",
     exploring: false,
     exploreEndAt: 0,
@@ -125,7 +121,7 @@ export function isSaveValid(saved: unknown): boolean {
     return node.children.every(nodeOk)
   }
   if (!Array.isArray(s.nodes) || !s.nodes.every(nodeOk)) return false
-  // 世界必须同时自带探索与手工合成
+  // 世界自带探索;手工合成可以在世界或背包
   const types = new Set<string>()
   const collect = (ns: GameNode[]) => {
     for (const n of ns) {
@@ -134,6 +130,7 @@ export function isSaveValid(saved: unknown): boolean {
     }
   }
   collect((s.nodes as GameNode[]) ?? [])
+  collect((s.backpack as GameNode[]) ?? [])
   if (!types.has("explorer") || !types.has("bench")) return false
   const pilesOk = (list: unknown) => Array.isArray(list) && list.every(nodeOk)
   return pilesOk(s.hotbar) && pilesOk(s.backpack)
@@ -194,11 +191,15 @@ export const useGameStore = defineStore("game", {
       walk(this.backpack)
       return map
     },
-    /** 手工合成台(第一个 bench 节点) */
-    benchNode: (s) => findNodeByType(s.nodes, "bench"),
+    /** 手工合成台(第一个 bench 节点,可能在世界也可能在背包) */
+    benchNode: (s) =>
+      findNodeByType(s.nodes, "bench") ?? findNodeByType(s.backpack, "bench"),
     explorerNode: (s) => findNodeByType(s.nodes, "explorer"),
     /** 合成台下方挂载的材料总量 */
-    benchPiles: (s) => sumPiles(findNodeByType(s.nodes, "bench")?.children ?? []),
+    benchPiles(): Record<string, number> {
+      const bench = this.benchNode
+      return bench ? sumPiles(bench.children) : {}
+    },
     /** 当前配方 × 合成台材料状态 */
     recipeState(): ReturnType<typeof recipeStateOf> {
       return recipeStateOf(this.selectedRecipeId, this.benchPiles)
@@ -220,7 +221,7 @@ export const useGameStore = defineStore("game", {
     reset() {
       this.$patch(freshState())
       this.pushLog("一个崭新的世界展开了。", "info")
-      this.pushLog("点击「探索」节点,5 秒后有几率在它下面发现新的地形。", "info")
+      this.pushLog("点击「探索」节点,几秒后有几率发现新的地形;「手工合成」在背包里等你。", "info")
     },
 
     /**
@@ -262,18 +263,22 @@ export const useGameStore = defineStore("game", {
     },
 
     clickNode(id: string) {
-      const hit = findNode(this.nodes, id)
+      const hit = findNode(this.nodes, id) ?? findNode(this.backpack, id)
       if (!hit) return
       this.selectedId = id
       const node = hit.node
-      const def = getDef(node.type)
+      const behavior = getDef(node.type).behavior
 
-      if (def.special) {
-        // 特殊节点有自己的点击行为,不向子节点传导
-        if (node.type === "explorer") this.startExplore()
-        else if (node.type === "bench") this.craftBench()
+      // 功能节点:按声明式行为分发,不向子节点传导
+      if (behavior?.kind === "explore") {
+        this.startExplore()
         return
       }
+      if (behavior?.kind === "craft") {
+        this.craftBench()
+        return
+      }
+      if (behavior) return // 其余行为(如工厂)暂无点击语义,静默
 
       if (node.children.length > 0) {
         // 点击父节点:以父节点为「点击来源」,依次触发每个子节点
@@ -316,66 +321,85 @@ export const useGameStore = defineStore("game", {
       if (hit) hit.node.collapsed = !hit.node.collapsed
     },
 
-    /** 从树上摘下节点:其子节点被释放回世界根层级,返回被摘下的节点 */
+    /** 从所在树的根上摘下节点:其子节点被释放回该树根层级,返回被摘下的节点 */
     detachNode(id: string): GameNode | null {
-      const hit = findNode(this.nodes, id)
-      if (!hit) return null
-      const removed = removeNode(this.nodes, id)
+      const inWorld = findNode(this.nodes, id)
+      const roots = inWorld ? this.nodes : this.backpack
+      const removed = removeNode(roots, id)
       if (!removed) return null
       if (removed.children.length > 0) {
         const orphanCount = removed.children.length
-        this.nodes.push(...removed.children)
+        roots.push(...removed.children)
         removed.children = []
-        this.pushLog(`${orphanCount} 个子节点被释放回世界根层级。`, "warn")
+        this.pushLog(`${orphanCount} 个子节点被释放回根层级。`, "warn")
       }
       if (this.selectedId === id) this.selectedId = null
       return removed
     },
 
-    /** 移除节点(特殊节点不可移除;子节点释放回根层级) */
+    /** 移除节点(永久节点不可移除;子节点释放回根层级) */
     removeNodeById(id: string) {
-      const hit = findNode(this.nodes, id)
+      const hit = findNode(this.nodes, id) ?? findNode(this.backpack, id)
       if (!hit) return
       const def = getDef(hit.node.type)
-      if (def.special) {
-        this.pushLog(`「${def.name}」是世界的一部分,不能被移除。`, "warn")
+      if (isPermanent(def.id)) {
+        this.pushLog(`「${def.name}」与世界同在,不能被移除。`, "warn")
         return
       }
       this.detachNode(id)
-      this.pushLog(`节点「${def.name}」已从世界移除。`, "info")
+      this.pushLog(`节点「${def.name}」已被移除。`, "info")
     },
 
-    /** 把节点收进物品栏(地形/特殊节点不可) */
+    /** 把节点收进物品栏(按区域权限拒绝) */
     nodeToItem(id: string) {
-      const hit = findNode(this.nodes, id)
+      const hit = findNode(this.nodes, id) ?? findNode(this.backpack, id)
       if (!hit) return
       const def = getDef(hit.node.type)
-      if (isLockedToWorld(def.id)) {
+      if (!canPlaceInZone(def.id, "hotbar")) {
         this.pushLog(`「${def.name}」没法收进物品栏。`, "warn")
         return
       }
       const removed = this.detachNode(id)
       if (!removed) return
-      removed.children = []
+      const released = releaseChildren(removed, this.nodes, this.backpack)
+      if (released > 0) this.pushLog(`${released} 个子节点被释放。`, "warn")
       this.addPile("hotbar", removed)
       this.pushLog(`「${def.name}」已收回物品栏。`, "info")
     },
 
-    /** 把物品栏/背包里的整堆节点放置为世界根节点(子节点释放回储区根) */
+    /**
+     * 放置到世界 = "放置"语义:一次只放置一个。
+     * 材料堆:只取 1 个,余量留在储区;单件节点(工具/手工合成):整体移动,子树随行。
+     */
     placeItem(id: string) {
-      let pile: GameNode | undefined
-      const hi = this.hotbar.findIndex((n) => n.id === id)
-      if (hi >= 0) {
-        pile = this.hotbar.splice(hi, 1)[0]
-      } else {
-        pile = removeNode(this.backpack, id) ?? undefined
+      let pile: GameNode | undefined =
+        this.hotbar.find((n) => n.id === id) ?? undefined
+      let fromHotbar = true
+      if (!pile) {
+        pile = findNode(this.backpack, id)?.node ?? undefined
+        fromHotbar = false
       }
       if (!pile) return
-      const released = releaseChildren(pile, this.nodes, this.backpack)
-      if (released > 0) this.pushLog(`${released} 个子节点被释放。`, "warn")
-      pile.collapsed = true
-      this.nodes.push(pile)
-      this.pushLog(`「${getDef(pile.type).name}」被放置进了世界。`, "info")
+      const type = pile.type
+      if (!canPlaceInZone(type, "world")) {
+        this.pushLog(`「${getDef(type).name}」离不开它所在的地方。`, "warn")
+        return
+      }
+      if (pileCount(pile) > 1) {
+        // 材料堆:拆出 1 个,余量原地保留
+        pile.count = pileCount(pile) - 1
+        this.nodes.push(this.makeNode(type))
+      } else {
+        if (fromHotbar) {
+          const idx = this.hotbar.findIndex((n) => n.id === id)
+          if (idx >= 0) this.hotbar.splice(idx, 1)
+        } else {
+          removeNode(this.backpack, id)
+        }
+        pile.collapsed = true
+        this.nodes.push(pile)
+      }
+      this.pushLog(`「${getDef(type).name}」被放置进了世界。`, "info")
     },
 
     // ── 物品 ─────────────────────────────────────────────
@@ -476,26 +500,34 @@ export const useGameStore = defineStore("game", {
     },
 
     // ── 探索(节点) ───────────────────────────────────────
+    /** 探索节点的声明式行为参数 */
+    exploreBehavior() {
+      const b = getDef("explorer").behavior
+      return b?.kind === "explore" ? b : null
+    },
+
     startExplore() {
       if (this.exploring) {
         this.pushLog(`还在探索中……(约 ${this.exploreCdLeft} 秒)`, "warn")
         return
       }
+      const b = this.exploreBehavior()
       this.exploring = true
-      this.exploreEndAt = Date.now() + EXPLORE_MS
+      this.exploreEndAt = Date.now() + (b?.durationMs ?? 5000)
       this.pushLog("你向着未知出发……", "info")
     },
 
     /** 到点结算:有概率在探索节点下生成地形 */
     resolveExplore() {
       this.exploring = false
-      const explorer = findNodeByType(this.nodes, "explorer")
+      const explorer = this.explorerNode
       if (!explorer) return
-      if (Math.random() >= EXPLORE_SUCCESS_RATE) {
+      const b = this.exploreBehavior()
+      if (Math.random() >= (b?.successRate ?? 0.5)) {
         this.pushLog("这次探索一无所获。", "warn")
         return
       }
-      const terrain = rollTerrain()
+      const terrain = rollPool(b?.pool ?? [{ type: "forest", weight: 1 }])
       const def = getDef(terrain)
       explorer.children.push(this.makeNode(terrain))
       explorer.collapsed = false // 有新发现,展开让玩家看见
@@ -550,16 +582,17 @@ export const useGameStore = defineStore("game", {
     },
 
     // ── 拖拽辅助 ─────────────────────────────────────────
-    /** 拖拽守卫:节点是否可以进入物品栏/背包(地形与特殊节点离不开世界) */
-    canEnterStorage(dragEl: HTMLElement): boolean {
+    /** 拖拽守卫:节点是否可以进入某个储区(按区域权限) */
+    canEnterZone(dragEl: HTMLElement, zone: "hotbar" | "backpack"): boolean {
       const type = dragEl.dataset.ntype
-      if (type && isLockedToWorld(type)) return false
+      if (type && !canPlaceInZone(type, zone)) return false
       return true
     },
 
-    /** 拖拽守卫:节点是否可以放入 board 上 owner 的子列表(防环) */
+    /** 拖拽守卫:节点是否可以放入 board 上 owner 的子列表(区域权限 + 防环) */
     canDropIntoChildList(dragEl: HTMLElement, board: BoardId, ownerId: string | undefined): boolean {
-      if (board !== "world" && !this.canEnterStorage(dragEl)) return false
+      const type = dragEl.dataset.ntype
+      if (type && !canPlaceInZone(type, board)) return false
       const dragId = dragEl.dataset.nodeId
       if (!dragId || !ownerId) return true
       return !isAncestorOf(this.boardRoots(board), dragId, ownerId)
@@ -567,7 +600,7 @@ export const useGameStore = defineStore("game", {
 
     /**
      * 节点落进储区(物品栏/背包)后的整理:
-     * 子树释放(地形/特殊回世界,其余回背包根)、同级同堆合并、物品栏超格溢出。
+     * 子树释放(能进背包的回背包根,其余回世界根)、同级同堆合并、物品栏超格溢出。
      */
     settleStorageDrop(zone: Zone, list: GameNode[], dropped: GameNode) {
       const released = releaseChildren(dropped, this.nodes, this.backpack)
@@ -576,6 +609,17 @@ export const useGameStore = defineStore("game", {
       }
       mergeSiblings(list)
       if (zone === "hotbar") this.enforceHotbarOverflow()
+    },
+
+    /**
+     * 物品堆被拖进"世界"后的结算:放置语义 = 一次只放一个,
+     * 余量退回来源储区(并入已有堆)。
+     */
+    settleWorldDrop(dropped: GameNode, fromZone: "hotbar" | "backpack") {
+      const total = pileCount(dropped)
+      if (total <= 1) return
+      dropped.count = 1
+      this.addCount(fromZone, dropped.type, total - 1)
     },
 
     // ── 存档导入/导出 ────────────────────────────────────
@@ -678,8 +722,8 @@ function releaseChildren(node: GameNode, world: GameNode[], backpack: GameNode[]
   const orphans = node.children
   node.children = []
   for (const o of orphans) {
-    if (isLockedToWorld(o.type)) world.push(o)
-    else backpack.push(o)
+    if (canPlaceInZone(o.type, "backpack")) backpack.push(o)
+    else world.push(o)
   }
   return orphans.length
 }

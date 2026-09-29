@@ -18,8 +18,8 @@ const ui = useUiStore()
 const isMobile = useMediaQuery("(max-width: 900px)")
 
 // 桌面端默认 世界+背包 分屏,移动端默认只有世界
-if (isMobile.value) ui.viewBackpack = false
-else ui.viewBackpack = true
+if (isMobile.value) ui.active.backpack = false
+else ui.active.backpack = true
 
 // 游戏心跳:时钟在 store 之外,避免每秒触发存档写盘;到点结算探索
 useIntervalFn(() => {
@@ -30,7 +30,7 @@ useIntervalFn(() => {
 onMounted(() => {
   if (!game.log.length) {
     game.pushLog("欢迎来到 minode。一切皆节点。", "info")
-    game.pushLog("点击「探索」节点,5 秒后有几率在它下面发现新的地形。", "info")
+    game.pushLog("点击「探索」节点,几秒后有几率发现新的地形;「手工合成」在背包里。", "info")
   }
 })
 
@@ -66,10 +66,7 @@ function onTouchEnd(e: TouchEvent) {
   const dx = e.changedTouches[0].clientX - st.x
   const dy = e.changedTouches[0].clientY - st.y
   if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.5) return
-  if (st.edge === "l" && dx > 0) {
-    ui.viewCodex = true
-    if (!ui.viewWorld && !ui.viewBackpack) ui.viewWorld = true
-  }
+  if (st.edge === "l" && dx > 0) ui.toggleView("codex")
   if (st.edge === "r" && dx < 0) ui.inspOpen = true
 }
 </script>
@@ -84,10 +81,15 @@ function onTouchEnd(e: TouchEvent) {
     <TopBar />
 
     <main class="views">
-      <CodexView v-if="ui.viewCodex" class="view" />
+      <!-- page 类视图独占显示;board 类视图按激活状态分屏 -->
+      <CodexView v-if="ui.active.codex" class="view" />
       <template v-else>
-        <NodeBoard v-if="ui.viewWorld" board="world" class="view" />
-        <NodeBoard v-if="ui.viewBackpack" board="backpack" class="view" />
+        <NodeBoard
+          v-for="v in ui.activeBoardViews"
+          :key="v.id"
+          :board="v.board!"
+          class="view"
+        />
       </template>
     </main>
 
@@ -126,7 +128,6 @@ function onTouchEnd(e: TouchEvent) {
     </el-dialog>
   </div>
 </template>
-
 <style scoped>
 .app {
   height: 100%;

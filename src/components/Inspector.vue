@@ -8,8 +8,8 @@ import {
   GitBranch,
   Settings2,
 } from "lucide-vue-next"
-import { findInteraction, getDef, getRecipe } from "../game/registry"
-import { nodeCount } from "../game/types"
+import { findInteraction, getDef, getRecipe, canPlaceInZone, isPermanent } from "../game/registry"
+import { CATEGORY_LABELS, nodeCount } from "../game/types"
 import { findNode } from "../game/tree"
 import { useGameStore } from "../stores/game"
 import { useUiStore } from "../stores/ui"
@@ -48,12 +48,12 @@ const handHint = computed(() =>
 
 async function removeSelected() {
   if (!node.value || !def.value) return
-  const isTerrain = def.value.terrain
+  const isTerrain = def.value.category === "terrain"
   try {
     await ElMessageBox.confirm(
       isTerrain
         ? `把「${def.value.name}」从世界移除?之后仍可能通过「探索」重新找到。`
-        : `把「${def.value.name}」移除?它下面的子节点会被释放回世界根层级。`,
+        : `把「${def.value.name}」移除?它下面的子节点会被释放回根层级。`,
       "移除节点",
       { type: "warning", confirmButtonText: "移除", cancelButtonText: "取消" },
     )
@@ -82,7 +82,7 @@ async function removeSelected() {
           </div>
           <div class="meta">
             <span class="cat" :class="`cat-${def.category}`">
-              {{ { terrain: '地形', tool: '工具', material: '材料', special: '特殊' }[def.category] }}
+              {{ CATEGORY_LABELS[def.category] }}
             </span>
             <span class="zone-tag">{{ { world: '世界中', hotbar: '物品栏', backpack: '背包' }[zone ?? 'world'] }}</span>
             <span class="id mono">#{{ node.id }}</span>
@@ -142,7 +142,7 @@ async function removeSelected() {
 
       <div class="btn-row">
         <el-button
-          v-if="inWorld && !def.special"
+          v-if="inWorld && canPlaceInZone(def.id, 'hotbar')"
           size="small"
           @click="game.nodeToItem(node.id)"
         >
@@ -150,7 +150,7 @@ async function removeSelected() {
           收进物品栏
         </el-button>
         <el-button
-          v-if="!inWorld"
+          v-if="!inWorld && canPlaceInZone(def.id, 'world')"
           size="small"
           @click="game.placeItem(node.id)"
         >
@@ -158,7 +158,7 @@ async function removeSelected() {
           放置到世界
         </el-button>
         <el-button
-          v-if="inWorld && !def.special"
+          v-if="!isPermanent(def.id)"
           size="small"
           type="danger"
           plain

@@ -16,9 +16,12 @@ pinia.use(piniaPluginPersistedstate)
 
 createApp(App).use(pinia).use(ElementPlus, { locale: zhCn }).mount("#app")
 
-// 开发期调试钩子:浏览器控制台可直接操作游戏状态
+// 开发期调试钩子:浏览器控制台可直接操作游戏状态与注册自定义内容
 if (import.meta.env.DEV) {
   import("./stores/game").then(({ useGameStore }) => {
     ;(window as unknown as Record<string, unknown>).__game = useGameStore()
+  })
+  import("./game/api").then(({ minodeApi }) => {
+    ;(window as unknown as Record<string, unknown>).minode = minodeApi
   })
 }
