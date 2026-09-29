@@ -1,0 +1,310 @@
+<script setup lang="ts">
+import { computed, ref } from "vue"
+import { VueDraggable } from "vue-draggable-plus"
+import { ChevronRight, Settings2, Ellipsis } from "lucide-vue-next"
+import { DND_COMMON, onTreeAdd, setDragging, treeGroup } from "../game/dnd"
+import { getDef, getRecipe } from "../game/registry"
+import type { GameNode } from "../game/types"
+import type { BoardId } from "../stores/game"
+import { useGameStore } from "../stores/game"
+import { useUiStore } from "../stores/ui"
+import NodeIcon from "./NodeIcon.vue"
+
+const props = defineProps<{ node: GameNode; board: BoardId; depth: number }>()
+const game = useGameStore()
+const ui = useUiStore()
+
+const fx = ref(false)
+
+const def = computed(() => getDef(props.node.type))
+const selected = computed(() => game.selectedId === props.node.id)
+const pileCount = computed(() =>
+  typeof props.node.count === "number" && props.node.count > 1 ? props.node.count : 0,
+)
+/** 物品堆落进树里的瞬态帧没有 children,渲染要安全 */
+const children = computed(() =>
+  Array.isArray(props.node.children) ? props.node.children : [],
+)
+const hasChildren = computed(() => children.value.length > 0)
+
+const benchRecipeName = computed(() => {
+  if (props.node.type !== "bench") return null
+  const r = getRecipe(game.selectedRecipeId)
+  return r ? getDef(r.output.type).name : "未选择"
+})
+
+const catLabel = computed(
+  () =>
+    ({
+      terrain: "地形",
+      tool: "工具",
+      material: "材料",
+      special: "特殊",
+    })[def.value.category],
+)
+
+/** 世界面板:点击 = 触发;背包面板:点击 = 仅选中 */
+function onRowClick() {
+  if (props.board === "world") {
+    game.clickNode(props.node.id)
+    fx.value = false
+    requestAnimationFrame(() => {
+      fx.value = true
+      setTimeout(() => (fx.value = false), 600)
+    })
+  } else {
+    game.select(props.node.id)
+  }
+}
+
+function openInspector() {
+  game.select(props.node.id)
+  ui.inspOpen = true
+}
+
+function openRecipe() {
+  game.select(props.node.id)
+  ui.recipeOpen = true
+}
+</script>
+
+<template>
+  <li
+    class="node-wrap"
+    :data-node-id="node.id"
+    :data-ntype="node.type"
+    :data-zone="board === 'world' ? 'tree' : 'backpack'"
+  >
+    <div
+      class="row-main"
+      :class="{ selected, 'trigger-fx': fx, special: def.special }"
+      @click="onRowClick"
+    >
+      <button
+        class="twisty"
+        :class="{ invisible: !hasChildren }"
+        tabindex="-1"
+        @click.stop="game.toggleCollapse(node.id)"
+      >
+        <ChevronRight :size="13" :class="{ rotated: !node.collapsed }" />
+      </button>
+      <NodeIcon :type="node.type" :size="16" />
+      <span class="nt-name">{{ def.name }}</span>
+      <span v-if="node.type === 'bench'" class="nt-sub">配方 · {{ benchRecipeName }}</span>
+      <span v-if="node.type === 'explorer' && game.exploring" class="nt-sub exploring">
+        {{ game.exploreCdLeft }}s
+      </span>
+      <span v-else-if="def.category !== 'special'" class="nt-cat" :class="`cat-${def.category}`">
+        {{ catLabel }}
+      </span>
+      <span class="nt-fill" />
+      <span v-if="pileCount" class="nt-pile mono">×{{ pileCount }}</span>
+      <span v-if="hasChildren" class="nt-kids mono">{{ children.length }}</span>
+      <button
+        v-if="node.type === 'bench'"
+        class="row-act"
+        title="选择配方"
+        @click.stop="openRecipe"
+      >
+        <Settings2 :size="14" />
+      </button>
+      <button class="row-act" title="详情" @click.stop="openInspector">
+        <Ellipsis :size="14" />
+      </button>
+    </div>
+
+    <!-- 子列表:展开时渲染;空列表(含折叠的空节点)在拖拽时显示为投放区 -->
+    <VueDraggable
+      v-if="!node.collapsed || !hasChildren"
+      v-model="node.children"
+      tag="ol"
+      class="child-list"
+      :class="{ 'is-empty': !hasChildren }"
+      :data-zone="board === 'world' ? 'tree' : 'backpack'"
+      :group="treeGroup(board, node.id)"
+      handle=".row-main"
+      v-bind="DND_COMMON"
+      @add="onTreeAdd(board, node, children, $event)"
+      @start="setDragging(true)"
+      @end="setDragging(false)"
+    >
+      <NodeItem
+        v-for="child in children"
+        :key="child.id"
+        :node="child"
+        :board="board"
+        :depth="depth + 1"
+      />
+    </VueDraggable>
+  </li>
+</template>
+
+<style scoped>
+.node-wrap {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* org 式行节点:全宽、无边框、无垂直间隙 */
+.row-main {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: var(--row-h);
+  padding: 0 6px 0 2px;
+  margin: 0;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.12s;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+.row-main:hover {
+  background: var(--hover);
+}
+.row-main:active {
+  background: var(--active);
+}
+.row-main.selected {
+  background: var(--accent-soft);
+  border-left-color: var(--accent);
+}
+.row-main.special .nt-name {
+  font-weight: 600;
+}
+
+.twisty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border: none;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  padding: 0;
+  border-radius: 4px;
+  flex: none;
+}
+.twisty:hover {
+  color: var(--fg);
+  background: var(--active);
+}
+.twisty :deep(svg) {
+  transition: transform 0.12s;
+}
+.twisty .rotated {
+  transform: rotate(90deg);
+}
+
+.nt-name {
+  color: var(--fg);
+  white-space: nowrap;
+}
+.nt-sub {
+  font-size: 11px;
+  color: var(--fg-faint);
+  white-space: nowrap;
+}
+.nt-sub.exploring {
+  color: var(--orange);
+  font-family: var(--mono);
+}
+.nt-cat {
+  font-size: 10px;
+  color: var(--fg-faint);
+  flex: none;
+  letter-spacing: 0.05em;
+}
+.nt-cat.cat-terrain {
+  color: var(--green);
+}
+.nt-cat.cat-tool {
+  color: var(--purple);
+}
+
+.nt-fill {
+  flex: 1;
+}
+.nt-pile {
+  font-size: 11px;
+  color: var(--fg-dim);
+  flex: none;
+}
+.nt-kids {
+  font-size: 10px;
+  color: var(--fg-faint);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0 6px;
+  line-height: 16px;
+  flex: none;
+}
+
+.row-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  opacity: 0.35;
+  flex: none;
+  transition: opacity 0.12s;
+}
+.row-main:hover .row-act,
+.row-main.selected .row-act {
+  opacity: 1;
+}
+.row-act:hover {
+  background: var(--active);
+  color: var(--fg);
+}
+/* 触屏设备:常显操作按钮 */
+@media (hover: none) {
+  .row-act {
+    opacity: 0.55;
+  }
+}
+
+/* 子列表缩进 + org 引导线 */
+.child-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 18px;
+  border-left: 1px solid var(--guide);
+  min-height: 6px;
+}
+.child-list.is-empty {
+  min-height: 8px;
+}
+/* 拖拽时,空子列表成为可见投放区,且向上咬合父行下半部分 */
+.app.dragging .child-list.is-empty {
+  min-height: 14px;
+  margin-top: -14px;
+  padding-top: 14px;
+  border-left: 1px dashed var(--guide);
+  position: relative;
+  margin-bottom: 3px;
+}
+.app.dragging .child-list.is-empty::after {
+  content: "↳ 挂为子节点";
+  position: absolute;
+  left: 19px;
+  top: 16px;
+  font-size: 10px;
+  color: var(--fg-faint);
+  pointer-events: none;
+}
+</style>
