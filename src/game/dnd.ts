@@ -65,7 +65,7 @@ export function onTreeAdd(
   const fromZone = evt.from?.dataset?.zone
   const fromStorage = fromZone === "hotbar" || fromZone === "backpack"
 
-  if (board === "world" && fromStorage) {
+  if (board === "world" && fromStorage && owner === null) {
     game.pushLog(`「${getDef(dropped.type).name}」被放置进了世界。`, "info")
   }
   if (owner?.collapsed) owner.collapsed = false

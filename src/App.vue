@@ -4,12 +4,12 @@ import { useIntervalFn, useMediaQuery } from "@vueuse/core"
 import TopBar from "./components/TopBar.vue"
 import BottomNav from "./components/BottomNav.vue"
 import NodeBoard from "./components/NodeBoard.vue"
-import CodexView from "./components/CodexView.vue"
 import Inspector from "./components/Inspector.vue"
 import LogConsole from "./components/LogConsole.vue"
 import Hotbar from "./components/Hotbar.vue"
 import StatusBar from "./components/StatusBar.vue"
 import RecipeDialog from "./components/RecipeDialog.vue"
+import { VIEW_DEFS } from "./ui/views"
 import { gameNow, useGameStore } from "./stores/game"
 import { useUiStore } from "./stores/ui"
 
@@ -81,8 +81,15 @@ function onTouchEnd(e: TouchEvent) {
     <TopBar />
 
     <main class="views">
-      <!-- page 类视图独占显示;board 类视图按激活状态分屏 -->
-      <CodexView v-if="ui.active.codex" class="view" />
+      <!-- page 类视图(注册表驱动)独占显示;board 类视图按激活状态分屏 -->
+      <template v-if="ui.pageOpen">
+        <component
+          :is="v.component"
+          v-for="v in VIEW_DEFS.filter((d) => d.kind === 'page' && ui.active[d.id])"
+          :key="v.id"
+          class="view"
+        />
+      </template>
       <template v-else>
         <NodeBoard
           v-for="v in ui.activeBoardViews"

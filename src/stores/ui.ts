@@ -5,14 +5,16 @@
 import { defineStore } from "pinia"
 import { VIEW_DEFS, getViewDef, type ViewId } from "../ui/views"
 
+function initialActive(): Record<ViewId, boolean> {
+  const active = {} as Record<ViewId, boolean>
+  for (const v of VIEW_DEFS) active[v.id] = v.id === "world"
+  return active
+}
+
 export const useUiStore = defineStore("ui", {
   state: () => ({
     /** 各视图是否激活(board 类可多选分屏,page 类独占覆盖) */
-    active: {
-      world: true,
-      backpack: false,
-      codex: false,
-    } as Record<ViewId, boolean>,
+    active: initialActive(),
     /** 检查器抽屉 */
     inspOpen: false,
     /** 日志抽屉 */
@@ -30,11 +32,10 @@ export const useUiStore = defineStore("ui", {
     toggleView(id: ViewId) {
       const def = getViewDef(id)
       if (def.kind === "page") {
-        this.active[id] = !this.active[id]
-        // 打开 page 时保证至少一个 board 视图,便于返回
-        if (this.active[id] && this.activeBoardViews.length === 0) {
-          this.active.world = true
-        }
+        // page 互斥:同一时间只开一个 page
+        const turningOn = !this.active[id]
+        VIEW_DEFS.filter((v) => v.kind === "page").forEach((v) => (this.active[v.id] = false))
+        this.active[id] = turningOn
         return
       }
       // board 视图:关掉覆盖的 page,再切换;至少保留一个

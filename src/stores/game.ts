@@ -49,6 +49,8 @@ interface GameState {
   selectedRecipeId: string
   /** 探索进行中状态 */
   exploring: boolean
+  /** 发起探索的节点 id(多探索节点时结算到正确的节点下) */
+  exploringNodeId: string | null
   exploreEndAt: number
   /** 本次世界开始时间(游玩时长 = now - startedAt) */
   startedAt: number
@@ -73,6 +75,7 @@ function freshState(): GameState {
     backpack: [{ id: "n2", type: "bench", children: [], collapsed: true }],
     selectedRecipeId: RECIPES[0]?.id ?? "",
     exploring: false,
+    exploringNodeId: null,
     exploreEndAt: 0,
     startedAt: Date.now(),
     discovered: [],
@@ -114,26 +117,46 @@ export function isSaveValid(saved: unknown): boolean {
     if (typeof node.id !== "string" || ids.has(node.id)) return false
     ids.add(node.id)
     if (typeof node.type !== "string") return false
-    if (node.count !== undefined && !(typeof node.count === "number" && node.count > 0)) {
+    if (
+      node.count !== undefined &&
+      !(typeof node.count === "number" && Number.isInteger(node.count) && node.count > 0)
+    ) {
       return false
     }
     if (!Array.isArray(node.children)) return false
     return node.children.every(nodeOk)
   }
   if (!Array.isArray(s.nodes) || !s.nodes.every(nodeOk)) return false
+  if (!Array.isArray(s.backpack) || !s.backpack.every(nodeOk)) return false
+  if (!Array.isArray(s.hotbar) || !s.hotbar.every(nodeOk)) return false
   // 世界自带探索;手工合成可以在世界或背包
-  const types = new Set<string>()
-  const collect = (ns: GameNode[]) => {
+  const worldTypes = new Set<string>()
+  const allTypes = new Set<string>()
+  const collect = (ns: GameNode[], into: Set<string>) => {
     for (const n of ns) {
-      types.add(n.type)
-      collect(n.children)
+      into.add(n.type)
+      collect(n.children, into)
     }
   }
-  collect((s.nodes as GameNode[]) ?? [])
-  collect((s.backpack as GameNode[]) ?? [])
-  if (!types.has("explorer") || !types.has("bench")) return false
-  const pilesOk = (list: unknown) => Array.isArray(list) && list.every(nodeOk)
-  return pilesOk(s.hotbar) && pilesOk(s.backpack)
+  collect(s.nodes as GameNode[], worldTypes)
+  collect(s.nodes as GameNode[], allTypes)
+  collect(s.backpack as GameNode[], allTypes)
+  if (!worldTypes.has("explorer")) return false
+  if (!allTypes.has("bench")) return false
+  // uid 必须不小于已有 n<数字> id 的最大后缀,避免 newNodeId 撞 id
+  let maxId = 0
+  const scanIds = (ns: GameNode[]) => {
+    for (const n of ns) {
+      const m = /^n(\d+)$/.exec(n.id)
+      if (m) maxId = Math.max(maxId, Number(m[1]))
+      scanIds(n.children)
+    }
+  }
+  scanIds(s.nodes as GameNode[])
+  scanIds(s.backpack as GameNode[])
+  scanIds(s.hotbar as GameNode[])
+  if ((s.uid as number) < maxId) return false
+  return true
 }
 
 /** 应用启动时调用:校验存档,不合规直接清掉(在 store hydrate 之前) */
@@ -271,11 +294,11 @@ export const useGameStore = defineStore("game", {
 
       // 功能节点:按声明式行为分发,不向子节点传导
       if (behavior?.kind === "explore") {
-        this.startExplore()
+        this.startExplore(node)
         return
       }
       if (behavior?.kind === "craft") {
-        this.craftBench()
+        this.craftBench(node)
         return
       }
       if (behavior) return // 其余行为(如工厂)暂无点击语义,静默
@@ -364,7 +387,8 @@ export const useGameStore = defineStore("game", {
       const released = releaseChildren(removed, this.nodes, this.backpack)
       if (released > 0) this.pushLog(`${released} 个子节点被释放。`, "warn")
       this.addPile("hotbar", removed)
-      this.pushLog(`「${def.name}」已收回物品栏。`, "info")
+      const landed = this.hotbar.includes(removed) ? "物品栏" : "背包"
+      this.pushLog(`「${def.name}」已收回${landed}。`, "info")
     },
 
     /**
@@ -406,8 +430,13 @@ export const useGameStore = defineStore("game", {
     /** 获得物品:优先并入已有堆 → 优先进物品栏 → 溢出进背包 */
     addItem(type: string, count = 1, silent = false) {
       const def = getDef(type)
-      this.addCount("hotbar", type, count)
-      this.enforceHotbarOverflow()
+      if (!canPlaceInZone(type, "hotbar") && !canPlaceInZone(type, "backpack")) {
+        // 产物进不了任何储区(如地形类产出) → 直接落到世界根
+        for (let i = 0; i < count; i++) this.nodes.push(this.makeNode(type))
+      } else {
+        this.addCount("hotbar", type, count)
+        this.enforceHotbarOverflow()
+      }
       if (!silent) this.pushLog(`获得 ${def.name} ×${count}`, "gain")
     },
 
@@ -500,29 +529,30 @@ export const useGameStore = defineStore("game", {
     },
 
     // ── 探索(节点) ───────────────────────────────────────
-    /** 探索节点的声明式行为参数 */
-    exploreBehavior() {
-      const b = getDef("explorer").behavior
-      return b?.kind === "explore" ? b : null
-    },
-
-    startExplore() {
+    startExplore(node: GameNode) {
       if (this.exploring) {
         this.pushLog(`还在探索中……(约 ${this.exploreCdLeft} 秒)`, "warn")
         return
       }
-      const b = this.exploreBehavior()
+      const b = nodeBehavior(node)?.kind === "explore" ? (nodeBehavior(node) as { kind: "explore"; durationMs?: number }) : null
       this.exploring = true
+      this.exploringNodeId = node.id
       this.exploreEndAt = Date.now() + (b?.durationMs ?? 5000)
       this.pushLog("你向着未知出发……", "info")
     },
 
-    /** 到点结算:有概率在探索节点下生成地形 */
+    /** 到点结算:有概率在发起探索的节点下生成地形 */
     resolveExplore() {
       this.exploring = false
-      const explorer = this.explorerNode
+      const explorer =
+        (this.exploringNodeId &&
+          (findNode(this.nodes, this.exploringNodeId)?.node ??
+            findNode(this.backpack, this.exploringNodeId)?.node)) ||
+        this.explorerNode
+      this.exploringNodeId = null
       if (!explorer) return
-      const b = this.exploreBehavior()
+      const raw = nodeBehavior(explorer)
+      const b = raw?.kind === "explore" ? raw : null
       if (Math.random() >= (b?.successRate ?? 0.5)) {
         this.pushLog("这次探索一无所获。", "warn")
         return
@@ -543,9 +573,11 @@ export const useGameStore = defineStore("game", {
       }
     },
 
-    /** 点击手工合成节点:检测其下挂载的材料并按当前配方合成 */
-    craftBench() {
-      const state = this.recipeState
+    /** 点击手工合成节点:检测该节点下挂载的材料并按当前配方合成 */
+    craftBench(bench?: GameNode) {
+      const target = bench ?? this.benchNode
+      if (!target) return
+      const state = recipeStateOf(this.selectedRecipeId, sumPiles(target.children))
       if (!state) return
       const recipe = state.recipe
       const missing = state.inputs
@@ -558,18 +590,16 @@ export const useGameStore = defineStore("game", {
         )
         return
       }
-      const bench = this.benchNode
-      if (!bench) return
       for (const input of recipe.inputs) {
         let left = input.count
-        for (let i = bench.children.length - 1; i >= 0 && left > 0; i--) {
-          const pile = bench.children[i]
+        for (let i = target.children.length - 1; i >= 0 && left > 0; i--) {
+          const pile = target.children[i]
           if (pile.type !== input.type) continue
           const have = pileCount(pile)
           const take = Math.min(have, left)
           left -= take
           if (have - take > 0) pile.count = have - take
-          else bench.children.splice(i, 1)
+          else target.children.splice(i, 1)
         }
       }
       this.addItem(recipe.output.type, recipe.output.count, true)
@@ -632,6 +662,7 @@ export const useGameStore = defineStore("game", {
         backpack: this.backpack,
         selectedRecipeId: this.selectedRecipeId,
         exploring: this.exploring,
+        exploringNodeId: this.exploringNodeId,
         exploreEndAt: this.exploreEndAt,
         startedAt: this.startedAt,
         discovered: this.discovered,
@@ -658,6 +689,7 @@ export const useGameStore = defineStore("game", {
         backpack: s.backpack as GameNode[],
         selectedRecipeId: s.selectedRecipeId as string,
         exploring: s.exploring as boolean,
+        exploringNodeId: (s.exploringNodeId ?? null) as string | null,
         exploreEndAt: s.exploreEndAt as number,
         startedAt: s.startedAt as number,
         discovered: s.discovered as string[],
@@ -680,6 +712,7 @@ export const useGameStore = defineStore("game", {
       "backpack",
       "selectedRecipeId",
       "exploring",
+      "exploringNodeId",
       "exploreEndAt",
       "startedAt",
       "discovered",
@@ -690,6 +723,11 @@ export const useGameStore = defineStore("game", {
     ],
   },
 })
+
+/** 取节点自身定义声明的行为 */
+function nodeBehavior(node: GameNode) {
+  return getDef(node.type).behavior
+}
 
 function findNodeByType(nodes: GameNode[], type: string): GameNode | null {
   for (const n of nodes) {

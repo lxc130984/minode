@@ -2,8 +2,11 @@
  * 游戏内容注册表:节点类型、交互规则、合成配方。
  * 新内容只需在这里(或通过 game/api.ts 运行时注册)追加定义,
  * 界面与引擎自动生效。
+ *
+ * 所有集合都是 shallowReactive:运行时注册(push/索引赋值)会立刻
+ * 反映到消费它们的 computed 与组件渲染里。
  */
-import type { Component } from "vue"
+import { markRaw, shallowReactive, type Component } from "vue"
 import {
   TreePine,
   Waves,
@@ -18,20 +21,20 @@ import {
 import type { Interaction, NodeDef, NodeZone, Recipe } from "./types"
 
 /** lucide 图标映射(自定义节点可通过 api.registerIcon 追加) */
-export const ICONS: Record<string, Component> = {
-  forest: TreePine,
-  river: Waves,
-  stone: Mountain,
-  stick: Wand,
-  wood: Logs,
-  stoneAxe: Axe,
-  hand: Hand,
-  explorer: Compass,
-  bench: Soup,
-}
+export const ICONS = shallowReactive<Record<string, Component>>({
+  forest: markRaw(TreePine),
+  river: markRaw(Waves),
+  stone: markRaw(Mountain),
+  stick: markRaw(Wand),
+  wood: markRaw(Logs),
+  stoneAxe: markRaw(Axe),
+  hand: markRaw(Hand),
+  explorer: markRaw(Compass),
+  bench: markRaw(Soup),
+})
 
 /** 全部节点类型定义 */
-export const NODE_DEFS: NodeDef[] = [
+export const NODE_DEFS: NodeDef[] = shallowReactive([
   {
     id: "explorer",
     name: "探索",
@@ -109,10 +112,10 @@ export const NODE_DEFS: NodeDef[] = [
     accent: "#8672bd",
     desc: "石头绑上木棍制成的斧头。把它拖到世界,再把森林挂在它下面,点击它就会砍伐森林。",
   },
-]
+])
 
-export const DEF_MAP: Record<string, NodeDef> = Object.fromEntries(
-  NODE_DEFS.map((d) => [d.id, d]),
+export const DEF_MAP: Record<string, NodeDef> = shallowReactive(
+  Object.fromEntries(NODE_DEFS.map((d) => [d.id, d])) as Record<string, NodeDef>,
 )
 
 const ALL_ZONES: NodeZone[] = ["world", "backpack", "hotbar"]
@@ -148,7 +151,7 @@ export function canPlaceInZone(type: string, zone: NodeZone): boolean {
 export const isPermanent = (type: string): boolean => !!DEF_MAP[type]?.permanent
 
 /** 交互规则表:source(来源) + target(目标) => 产出 */
-export const INTERACTIONS: Interaction[] = [
+export const INTERACTIONS: Interaction[] = shallowReactive([
   {
     source: "hand",
     target: "forest",
@@ -213,10 +216,10 @@ export const INTERACTIONS: Interaction[] = [
     results: [],
     note: "森林「使用」石斧?这个挂法好像反了。",
   },
-]
+])
 
-const INTERACTION_MAP: Record<string, Interaction> = Object.fromEntries(
-  INTERACTIONS.map((i) => [`${i.source}>${i.target}`, i]),
+const INTERACTION_MAP: Record<string, Interaction> = shallowReactive(
+  Object.fromEntries(INTERACTIONS.map((i) => [`${i.source}>${i.target}`, i])) as Record<string, Interaction>,
 )
 export { INTERACTION_MAP }
 
@@ -225,7 +228,7 @@ export function findInteraction(source: string, target: string): Interaction | u
 }
 
 /** 合成配方 */
-export const RECIPES: Recipe[] = [
+export const RECIPES: Recipe[] = shallowReactive([
   {
     id: "stone-axe",
     category: "石器",
@@ -235,7 +238,7 @@ export const RECIPES: Recipe[] = [
     ],
     output: { type: "stoneAxe", count: 1 },
   },
-]
+])
 
 export const getRecipe = (id: string): Recipe | undefined =>
   RECIPES.find((r) => r.id === id)

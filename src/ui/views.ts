@@ -5,8 +5,9 @@
  *     声明 board 数据源;同类面板可多选分屏。
  *   - kind "page":普通页面(图鉴、设置这类按钮界面),独占显示。
  */
-import type { Component } from "vue"
+import { markRaw, type Component } from "vue"
 import { Globe, Backpack, BookOpen } from "lucide-vue-next"
+import CodexView from "../components/CodexView.vue"
 import type { BoardId } from "../stores/game"
 
 export type ViewId = "world" | "backpack" | "codex"
@@ -21,19 +22,21 @@ export interface ViewDef {
   board?: BoardId
   /** board 类视图是否可与其他 board 并排分屏 */
   splittable?: boolean
+  /** page 类视图渲染的组件 */
+  component?: Component
 }
 
 export const VIEW_DEFS: ViewDef[] = [
-  { id: "world", title: "世界", icon: Globe, kind: "board", board: "world", splittable: true },
+  { id: "world", title: "世界", icon: markRaw(Globe), kind: "board", board: "world", splittable: true },
   {
     id: "backpack",
     title: "背包",
-    icon: Backpack,
+    icon: markRaw(Backpack),
     kind: "board",
     board: "backpack",
     splittable: true,
   },
-  { id: "codex", title: "图鉴", icon: BookOpen, kind: "page" },
+  { id: "codex", title: "图鉴", icon: markRaw(BookOpen), kind: "page", component: markRaw(CodexView) },
 ]
 
 export const getViewDef = (id: ViewId): ViewDef =>
