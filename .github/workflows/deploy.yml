@@ -33,6 +33,9 @@ jobs:
         run: npm run build
 
       - uses: actions/configure-pages@v5
+        with:
+          # 若仓库尚未启用 Pages,自动以 GitHub Actions 为来源启用
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
