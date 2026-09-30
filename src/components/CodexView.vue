@@ -35,7 +35,7 @@ function ownedOf(type: string): number | null {
 function zoneLabel(def: NodeDef): string {
   const zones = zonesOf(def.id)
   if (zones.length >= 3) return ""
-  return ` · 仅${zones.map((z) => ({ world: "世界", backpack: "背包", hotbar: "物品栏" })[z]).join("/")}`
+  return ` · 仅${zones.map((z) => ({ world: "世界", backpack: "背包" })[z]).join("/")}`
 }
 </script>
 
@@ -68,15 +68,16 @@ function zoneLabel(def: NodeDef): string {
       <div class="panel-title"><Info :size="13" /> 上手指南</div>
       <ol class="guide">
         <li>点击「探索」节点,几秒后有几率在它下面发现森林或河流。</li>
-        <li>空手点击<b>森林</b>:有概率捡到木棍和石子(物品先进物品栏,堆满进背包)。</li>
-        <li>「手工合成」就在<b>背包</b>里:把 <b>石子堆</b> 和 <b>木棍堆</b> 整堆拖到它下面,点击它合成<b>石斧</b>(3 石子 + 2 木棍)。</li>
-        <li>把石斧<b>放置</b>到世界(拖过去或双击物品栏,一次放一个),再把森林拖到石斧<b>下方</b>。</li>
+        <li>空手点击<b>森林</b>:有概率捡到木棍和石子,自动堆进背包。</li>
+        <li>点击世界里的<b>背包</b>节点,右侧展开背包分屏;「手工合成」就在背包里。</li>
+        <li>把 <b>石子堆</b> 和 <b>木棍堆</b> 整堆拖到「手工合成」下面,点击它合成<b>石斧</b>(3 石子 + 2 木棍)。</li>
+        <li>把石斧拖到<b>世界</b>(一次只放置一个),再把森林拖到石斧<b>下方</b>。</li>
         <li>点击<b>石斧</b>:点击会传导到森林,产出木头!</li>
-        <li>底部导航同时选中<b>世界 + 背包</b>可分屏,直接在两边拖拽节点;两个界面里都能把节点组织成树。</li>
+        <li>背包里同类物品自动堆成一棵小树;把一堆拖到另一堆下面即可合并,拖到世界一次放一个。</li>
         <li>右上角菜单可<b>导出/导入</b>世界存档。</li>
       </ol>
       <p class="guide-tip">
-        一切皆节点:拖进「世界」是放置(材料一次放一个);物品栏与背包之间是整堆搬运。
+        一切皆节点:世界与背包是两棵同构的树,拖拽即交互。
       </p>
     </section>
   </nav>

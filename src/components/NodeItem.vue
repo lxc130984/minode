@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
 import { VueDraggable } from "vue-draggable-plus"
-import { ChevronRight, Settings2, Ellipsis } from "lucide-vue-next"
+import { ChevronRight, Settings2, Ellipsis, PanelRightOpen, PanelRightClose } from "lucide-vue-next"
 import { DND_COMMON, onTreeAdd, setDragging, treeGroup } from "../game/dnd"
 import { getDef, getRecipe } from "../game/registry"
 import type { GameNode } from "../game/types"
-import { CATEGORY_LABELS } from "../game/types"
+import { CATEGORY_LABELS, isStack, nodeCount } from "../game/types"
 import type { BoardId } from "../stores/game"
 import { useGameStore } from "../stores/game"
 import { useUiStore } from "../stores/ui"
@@ -19,14 +19,25 @@ const fx = ref(false)
 
 const def = computed(() => getDef(props.node.type))
 const selected = computed(() => game.selectedId === props.node.id)
-const pileCount = computed(() =>
-  typeof props.node.count === "number" && props.node.count > 1 ? props.node.count : 0,
-)
 /** 物品堆落进树里的瞬态帧没有 children,渲染要安全 */
 const children = computed(() =>
   Array.isArray(props.node.children) ? props.node.children : [],
 )
 const hasChildren = computed(() => children.value.length > 0)
+/** 背包里的同类堆:显示总数徽标;子节点超过 4 个用省略号 */
+const isItemStack = computed(
+  () => props.board === "backpack" && isStack(props.node) && hasChildren.value,
+)
+const stackTotal = computed(() => (isItemStack.value ? nodeCount(props.node) : 0))
+const hiddenCount = computed(() =>
+  isItemStack.value ? Math.max(0, children.value.length - 4) : 0,
+)
+const catLabel = computed(() => CATEGORY_LABELS[def.value.category])
+/** 功能节点带行为(探索/合成/视图开关等) */
+const isFunctional = computed(() => !!def.value.behavior)
+/** 视图开关节点(背包):点击开合分屏 */
+const isViewToggle = computed(() => def.value.behavior?.kind === "view-toggle")
+const noChildren = computed(() => !!def.value.noChildren)
 
 const benchRecipeName = computed(() => {
   if (props.node.type !== "bench") return null
@@ -34,25 +45,27 @@ const benchRecipeName = computed(() => {
   return r ? getDef(r.output.type).name : "未选择"
 })
 
-const catLabel = computed(() => CATEGORY_LABELS[def.value.category])
-/** 功能节点带行为(探索/合成等),在任何面板都可点击触发 */
-const isFunctional = computed(() => !!def.value.behavior)
+function fireFx() {
+  fx.value = false
+  requestAnimationFrame(() => {
+    fx.value = true
+    setTimeout(() => (fx.value = false), 600)
+  })
+}
 
-/**
- * 点击行为:功能节点(按 behavior 分发)任何面板都触发;
- * 普通节点只在"世界"里触发(父触发子/空手),背包里仅选中。
- */
+/** 点击:视图开关节点切换分屏;功能节点(按 behavior 分发)任何面板都触发;
+ *  普通节点只在"世界"里触发(父触发子/空手),背包里仅选中。 */
 function onRowClick() {
+  game.select(props.node.id)
+  if (isViewToggle.value) {
+    ui.toggleBackpack()
+    fireFx()
+    return
+  }
   const clickable = isFunctional.value || props.board === "world"
   if (clickable) {
     game.clickNode(props.node.id)
-    fx.value = false
-    requestAnimationFrame(() => {
-      fx.value = true
-      setTimeout(() => (fx.value = false), 600)
-    })
-  } else {
-    game.select(props.node.id)
+    fireFx()
   }
 }
 
@@ -76,11 +89,12 @@ function openRecipe() {
   >
     <div
       class="row-main"
-      :class="{ selected, 'trigger-fx': fx, functional: isFunctional }"
+      :class="{ selected, 'trigger-fx': fx, functional: isFunctional, 'view-toggle': isViewToggle }"
       :style="def.accent ? { '--node-accent': def.accent } : undefined"
       @click="onRowClick"
     >
       <button
+        v-if="!noChildren"
         class="twisty"
         :class="{ invisible: !hasChildren }"
         tabindex="-1"
@@ -96,12 +110,16 @@ function openRecipe() {
       <span v-if="node.type === 'explorer' && game.exploring" class="nt-sub exploring">
         {{ game.exploreCdLeft }}s
       </span>
+      <span v-else-if="isViewToggle" class="nt-sub view-state" :class="{ open: ui.backpackOpen }">
+        <component :is="ui.backpackOpen ? PanelRightClose : PanelRightOpen" :size="12" />
+        {{ ui.backpackOpen ? "已开启" : "已收起" }}
+      </span>
       <span v-else-if="!isFunctional" class="nt-cat" :class="`cat-${def.category}`">
         {{ catLabel }}
       </span>
       <span class="nt-fill" />
-      <span v-if="pileCount" class="nt-pile mono">×{{ pileCount }}</span>
-      <span v-if="hasChildren" class="nt-kids mono">{{ children.length }}</span>
+      <span v-if="isItemStack" class="nt-pile mono">×{{ stackTotal }}</span>
+      <span v-else-if="hasChildren && !noChildren" class="nt-kids mono">{{ children.length }}</span>
       <button
         v-if="node.type === 'bench'"
         class="row-act"
@@ -115,13 +133,14 @@ function openRecipe() {
       </button>
     </div>
 
-    <!-- 子列表:展开时渲染;空列表(含折叠的空节点)在拖拽时显示为投放区 -->
+    <!-- 子列表:展开时渲染;空列表(含折叠的空节点)在拖拽时显示为投放区;
+         背包堆默认只显示前 4 个子节点,其余折叠为省略号 -->
     <VueDraggable
-      v-if="!node.collapsed || !hasChildren"
+      v-if="!noChildren && (!node.collapsed || !hasChildren)"
       v-model="node.children"
       tag="ol"
       class="child-list"
-      :class="{ 'is-empty': !hasChildren }"
+      :class="{ 'is-empty': !hasChildren, 'stack-list': isItemStack }"
       :data-zone="board === 'world' ? 'tree' : 'backpack'"
       :group="treeGroup(board, node.id)"
       handle=".row-main"
@@ -138,6 +157,7 @@ function openRecipe() {
         :depth="depth + 1"
       />
     </VueDraggable>
+    <div v-if="hiddenCount > 0" class="stack-ellipsis mono">⋯ 还有 {{ hiddenCount }} 个</div>
   </li>
 </template>
 
@@ -179,6 +199,9 @@ function openRecipe() {
 .row-main.functional .nt-name {
   font-weight: 600;
 }
+.row-main.view-toggle .nt-name {
+  font-weight: 700;
+}
 
 .twisty {
   display: inline-flex;
@@ -217,6 +240,14 @@ function openRecipe() {
 .nt-sub.exploring {
   color: var(--orange);
   font-family: var(--mono);
+}
+.nt-sub.view-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.nt-sub.view-state.open {
+  color: var(--accent);
 }
 .nt-cat {
   font-size: 10px;
@@ -292,6 +323,18 @@ function openRecipe() {
   min-height: 8px;
   border-left-color: transparent;
   padding-left: 0;
+}
+/* 背包堆:只显示前 4 个子节点(占位保持 sortable 索引对齐),其余隐藏 */
+.child-list.stack-list > .node-wrap:nth-child(n + 5) {
+  display: none;
+}
+.stack-ellipsis {
+  margin: 0 0 2px 18px;
+  padding-left: 8px;
+  font-size: 11px;
+  color: var(--fg-faint);
+  border-left: 1px dashed var(--guide);
+  pointer-events: none;
 }
 /* 拖拽时,空子列表成为可见投放区,且向上咬合父行下半部分 */
 .app.dragging .child-list.is-empty {

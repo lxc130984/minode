@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref } from "vue"
-import { Boxes, EllipsisVertical } from "lucide-vue-next"
+import { Boxes, EllipsisVertical, BookOpen } from "lucide-vue-next"
 import { ElMessage, ElMessageBox } from "element-plus"
 import { useGameStore } from "../stores/game"
+import { useUiStore } from "../stores/ui"
 
 const game = useGameStore()
+const ui = useUiStore()
 const fileInput = ref<HTMLInputElement | null>(null)
 
 async function resetSave() {
@@ -75,18 +77,29 @@ async function onImportFile(e: Event) {
       <span class="sub">一切皆节点</span>
     </div>
 
-    <el-dropdown trigger="click">
-      <button class="icon-btn" title="菜单">
-        <EllipsisVertical :size="17" />
+    <div class="right">
+      <button
+        class="icon-btn"
+        :class="{ on: ui.codexOpen }"
+        title="图鉴"
+        @click="ui.toggleCodex()"
+      >
+        <BookOpen :size="17" />
       </button>
-      <template #dropdown>
-        <el-dropdown-menu>
-          <el-dropdown-item @click="exportSave">导出存档</el-dropdown-item>
-          <el-dropdown-item @click="pickImport">导入存档</el-dropdown-item>
-          <el-dropdown-item divided @click="resetSave">新的世界(重置)</el-dropdown-item>
-        </el-dropdown-menu>
-      </template>
-    </el-dropdown>
+
+      <el-dropdown trigger="click">
+        <button class="icon-btn" title="菜单">
+          <EllipsisVertical :size="17" />
+        </button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item @click="exportSave">导出存档</el-dropdown-item>
+            <el-dropdown-item @click="pickImport">导入存档</el-dropdown-item>
+            <el-dropdown-item divided @click="resetSave">新的世界(重置)</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+    </div>
 
     <input
       ref="fileInput"
@@ -135,6 +148,15 @@ async function onImportFile(e: Event) {
   color: var(--fg-faint);
   letter-spacing: 0.2em;
   margin-left: 2px;
+}
+.right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.icon-btn.on {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 @media (max-width: 900px) {
   .sub {

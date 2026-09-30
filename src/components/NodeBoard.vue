@@ -86,7 +86,7 @@ const meta = computed(() =>
         />
       </VueDraggable>
       <div v-if="!game.boardRoots(board).length" class="empty-hint">
-        {{ board === "world" ? "世界空空如也。" : "背包空空如也,获得的物品会先堆到物品栏。" }}
+        {{ board === "world" ? "世界空空如也。" : "背包空空如也,获得的物品会自动堆到这里。" }}
       </div>
     </div>
   </section>

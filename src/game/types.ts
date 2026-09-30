@@ -7,7 +7,7 @@
 export type Category = "terrain" | "material" | "tool" | "functional"
 
 /** 节点可以存在的区域(面板/储区) */
-export type NodeZone = "world" | "backpack" | "hotbar"
+export type NodeZone = "world" | "backpack"
 
 /**
  * 功能节点行为:声明式描述"点击这个节点会发生什么"。
@@ -36,7 +36,17 @@ export interface FactoryBehavior {
   intervalMs: number
 }
 
-export type NodeBehavior = ExploreBehavior | CraftBehavior | FactoryBehavior
+/** 视图开关行为:点击节点切换某个界面(如「背包」节点开合背包分屏) */
+export interface ViewToggleBehavior {
+  kind: "view-toggle"
+  view: "backpack" | "codex"
+}
+
+export type NodeBehavior =
+  | ExploreBehavior
+  | CraftBehavior
+  | FactoryBehavior
+  | ViewToggleBehavior
 
 /** 节点类型定义(注册表条目) */
 export interface NodeDef {
@@ -58,20 +68,24 @@ export interface NodeDef {
    * 缺省:worldOnly → 仅世界;否则全区域。
    */
   zones?: NodeZone[]
+  /** 禁止挂载子节点(如「背包」节点:不可折叠、不可挂载,但可挂到其他节点上) */
+  noChildren?: boolean
   /** 永久节点:不可被移除、不可凭空消失(探索、手工合成) */
   permanent?: boolean
   /** 功能节点行为 */
   behavior?: NodeBehavior
 }
 
-/** 节点实例:世界树 / 背包 / 物品栏通用 */
+/**
+ * 节点实例:世界树 / 背包通用。
+ * 数量语义:每个节点 = 1 件物品;一堆同类物品 = 一个父节点挂着同类子节点,
+ * 堆的大小 = 子树大小(nodeCount)。
+ */
 export interface GameNode {
   id: string
   type: string
   children: GameNode[]
   collapsed?: boolean
-  /** 材料堆数量;工具/地形等单件节点省略(视为 1) */
-  count?: number
 }
 
 /** 配方/交互里的物品槽位 */
@@ -120,9 +134,15 @@ export interface LogEntry {
 export const isGameNode = (v: unknown): v is GameNode =>
   !!v && typeof v === "object" && Array.isArray((v as GameNode).children)
 
-/** 节点的有效数量(材料堆按 count,单件按 1) */
+/**
+ * 节点的有效数量 = 子树大小(自己 1 件 + 挂载的同类子节点们)
+ */
 export const nodeCount = (n: GameNode): number =>
-  typeof n.count === "number" && n.count > 0 ? n.count : 1
+  1 + n.children.reduce((sum, c) => sum + nodeCount(c), 0)
+
+/** 是否是一堆同类物品(所有后代都与自己同类) */
+export const isStack = (n: GameNode): boolean =>
+  n.children.every((c) => c.type === n.type && isStack(c))
 
 /** 分类的默认标签 */
 export const CATEGORY_LABELS: Record<Category, string> = {

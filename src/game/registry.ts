@@ -17,6 +17,7 @@ import {
   Hand,
   Compass,
   Soup,
+  Backpack,
 } from "lucide-vue-next"
 import type { Interaction, NodeDef, NodeZone, Recipe } from "./types"
 
@@ -31,6 +32,7 @@ export const ICONS = shallowReactive<Record<string, Component>>({
   hand: markRaw(Hand),
   explorer: markRaw(Compass),
   bench: markRaw(Soup),
+  backpackNode: markRaw(Backpack),
 })
 
 /** 全部节点类型定义 */
@@ -53,6 +55,18 @@ export const NODE_DEFS: NodeDef[] = shallowReactive([
         { type: "river", weight: 0.35 },
       ],
     },
+  },
+  {
+    id: "backpackNode",
+    name: "背包",
+    category: "functional",
+    icon: "backpackNode",
+    worldOnly: true,
+    permanent: true,
+    noChildren: true,
+    accent: "#b98a2f",
+    desc: "点击它,在右侧开合背包分屏。它是一个开关:获得的物品都会进背包,把材料整堆拖到「手工合成」下面就能批量合成。",
+    behavior: { kind: "view-toggle", view: "backpack" },
   },
   {
     id: "bench",
@@ -118,7 +132,7 @@ export const DEF_MAP: Record<string, NodeDef> = shallowReactive(
   Object.fromEntries(NODE_DEFS.map((d) => [d.id, d])) as Record<string, NodeDef>,
 )
 
-const ALL_ZONES: NodeZone[] = ["world", "backpack", "hotbar"]
+const ALL_ZONES: NodeZone[] = ["world", "backpack"]
 
 export function getDef(type: string): NodeDef {
   return (

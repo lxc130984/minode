@@ -1,25 +1,19 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue"
-import { useIntervalFn, useMediaQuery } from "@vueuse/core"
+import { useIntervalFn } from "@vueuse/core"
+import { X } from "lucide-vue-next"
 import TopBar from "./components/TopBar.vue"
-import BottomNav from "./components/BottomNav.vue"
 import NodeBoard from "./components/NodeBoard.vue"
+import CodexView from "./components/CodexView.vue"
 import Inspector from "./components/Inspector.vue"
 import LogConsole from "./components/LogConsole.vue"
-import Hotbar from "./components/Hotbar.vue"
 import StatusBar from "./components/StatusBar.vue"
 import RecipeDialog from "./components/RecipeDialog.vue"
-import { VIEW_DEFS } from "./ui/views"
 import { gameNow, useGameStore } from "./stores/game"
 import { useUiStore } from "./stores/ui"
 
 const game = useGameStore()
 const ui = useUiStore()
-const isMobile = useMediaQuery("(max-width: 900px)")
-
-// 桌面端默认 世界+背包 分屏,移动端默认只有世界
-if (isMobile.value) ui.active.backpack = false
-else ui.active.backpack = true
 
 // 游戏心跳:时钟在 store 之外,避免每秒触发存档写盘;到点结算探索
 useIntervalFn(() => {
@@ -30,11 +24,11 @@ useIntervalFn(() => {
 onMounted(() => {
   if (!game.log.length) {
     game.pushLog("欢迎来到 minode。一切皆节点。", "info")
-    game.pushLog("点击「探索」节点,几秒后有几率发现新的地形;「手工合成」在背包里。", "info")
+    game.pushLog("点击「探索」节点寻找地形;点击「背包」节点开合背包分屏。", "info")
   }
 })
 
-// ── 移动端边缘滑动:左缘右滑开图鉴,右缘左滑开检查器 ────
+// ── 移动端边缘滑动:左缘右滑开图鉴浮窗,右缘左滑开检查器 ────
 // 起点落在可拖拽表面上时不视为边缘手势,避免与节点拖拽冲突
 const touch = ref<{ x: number; y: number; edge: "l" | "r" | null } | null>(null)
 
@@ -44,9 +38,7 @@ function onTouchStart(e: TouchEvent) {
     return
   }
   const t = e.touches[0]
-  const onDragSurface = !!(t.target as HTMLElement | null)?.closest?.(
-    "[data-node-id], .slot",
-  )
+  const onDragSurface = !!(t.target as HTMLElement | null)?.closest?.("[data-node-id]")
   touch.value = {
     x: t.clientX,
     y: t.clientY,
@@ -66,7 +58,7 @@ function onTouchEnd(e: TouchEvent) {
   const dx = e.changedTouches[0].clientX - st.x
   const dy = e.changedTouches[0].clientY - st.y
   if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.5) return
-  if (st.edge === "l" && dx > 0) ui.toggleView("codex")
+  if (st.edge === "l" && dx > 0) ui.toggleCodex()
   if (st.edge === "r" && dx < 0) ui.inspOpen = true
 }
 </script>
@@ -81,28 +73,22 @@ function onTouchEnd(e: TouchEvent) {
     <TopBar />
 
     <main class="views">
-      <!-- page 类视图(注册表驱动)独占显示;board 类视图按激活状态分屏 -->
-      <template v-if="ui.pageOpen">
-        <component
-          :is="v.component"
-          v-for="v in VIEW_DEFS.filter((d) => d.kind === 'page' && ui.active[d.id])"
-          :key="v.id"
-          class="view"
-        />
-      </template>
-      <template v-else>
-        <NodeBoard
-          v-for="v in ui.activeBoardViews"
-          :key="v.id"
-          :board="v.board!"
-          class="view"
-        />
-      </template>
+      <!-- 世界常驻;背包分屏由「背包」节点开关 -->
+      <NodeBoard board="world" class="view" />
+      <NodeBoard v-if="ui.backpackOpen" board="backpack" class="view" />
     </main>
 
-    <Hotbar />
-    <BottomNav />
     <StatusBar />
+
+    <!-- 图鉴浮窗(右上角) -->
+    <Transition name="float">
+      <div v-if="ui.codexOpen" class="codex-float">
+        <button class="float-close icon-btn" title="关闭" @click="ui.codexOpen = false">
+          <X :size="15" />
+        </button>
+        <CodexView />
+      </div>
+    </Transition>
 
     <!-- 抽屉与对话框 -->
     <el-drawer
@@ -135,6 +121,7 @@ function onTouchEnd(e: TouchEvent) {
     </el-dialog>
   </div>
 </template>
+
 <style scoped>
 .app {
   height: 100%;
@@ -155,7 +142,6 @@ function onTouchEnd(e: TouchEvent) {
   min-width: 0;
   min-height: 0;
 }
-
 @media (max-width: 900px) {
   .app {
     padding: 4px;
@@ -169,7 +155,41 @@ function onTouchEnd(e: TouchEvent) {
 </style>
 
 <style>
-/* 抽屉暗色内衬对齐主题 */
+/* 图鉴浮窗:右上角悬浮卡片 */
+.codex-float {
+  position: fixed;
+  top: calc(var(--topbar-h) + 14px);
+  right: 12px;
+  width: min(440px, 94vw);
+  max-height: min(76vh, 720px);
+  overflow: hidden auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 36px rgba(40, 70, 40, 0.18);
+  z-index: 60;
+  padding: 6px;
+}
+.codex-float > .codex {
+  height: auto;
+}
+.float-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  background: var(--bg-panel);
+}
+.float-enter-active,
+.float-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.float-enter-from,
+.float-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+/* 抽屉内衬对齐主题 */
 .drawer-insp .el-drawer__body {
   padding: 0;
   background: var(--bg-panel);

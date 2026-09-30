@@ -11,7 +11,7 @@
  *     icon: "wood",
  *     desc: "闷烧木头得到的炭。",
  *     accent: "#5a4a3a",
- *     zones: ["world", "backpack", "hotbar"],
+ *     zones: ["world", "backpack"],
  *   })
  */
 import {

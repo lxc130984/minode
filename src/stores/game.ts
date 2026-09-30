@@ -1,6 +1,8 @@
 /**
- * 游戏主 store:世界树 + 背包/物品栏(同为节点) + 探索/合成 + 日志。
- * 一切皆节点:拖拽在 世界树 / 物品栏 / 背包 之间就是移动节点本身。
+ * 游戏主 store:世界树 + 背包 + 探索/合成 + 日志。
+ * 一切皆节点:世界与背包是两棵同构的树,拖拽就是移动节点本身。
+ * 物品数量语义:每个节点 = 1 件;一堆同类物品 = 父节点挂同类子节点,
+ * 堆大小 = 子树大小(nodeCount)。
  * 由 pinia-plugin-persistedstate 自动存档到 localStorage。
  */
 import { defineStore } from "pinia"
@@ -16,13 +18,12 @@ import {
   rollPool,
 } from "../game/registry"
 import type { GameNode, LogEntry, LogKind } from "../game/types"
-import { nodeCount as pileCount } from "../game/types"
+import { nodeCount } from "../game/types"
 import { countNodes, findNode, isAncestorOf, removeNode } from "../game/tree"
 
-export const HOTBAR_SLOTS = 10
 const LOG_LIMIT = 200
 /** 存档结构版本:不匹配时自动开新档 */
-export const SAVE_VERSION = 4
+export const SAVE_VERSION = 5
 /** 存档在 localStorage 里的 key(与 persist 配置共用) */
 export const SAVE_KEY = "game"
 
@@ -35,14 +36,10 @@ export const gameNow = ref(Date.now())
 /** 节点面板(board)标识:世界、背包…… 未来可继续扩展同构面板 */
 export type BoardId = "world" | "backpack"
 
-type Zone = "hotbar" | "backpack"
-
 interface GameState {
   version: number
   /** 世界树(根节点列表) */
   nodes: GameNode[]
-  /** 物品栏(快速栏,最多 10 堆) */
-  hotbar: GameNode[]
   /** 背包(与世界同构的节点树) */
   backpack: GameNode[]
   /** 手工合成当前选择的配方 */
@@ -69,10 +66,12 @@ interface GameState {
 function freshState(): GameState {
   return {
     version: SAVE_VERSION,
-    // 每个世界自带:探索(在世界) + 手工合成(在背包,方便批量挂料合成)
-    nodes: [{ id: "n1", type: "explorer", children: [], collapsed: true }],
-    hotbar: [],
-    backpack: [{ id: "n2", type: "bench", children: [], collapsed: true }],
+    // 每个世界自带:探索 + 背包开关(在世界);手工合成(在背包,方便批量挂料)
+    nodes: [
+      { id: "n1", type: "explorer", children: [], collapsed: true },
+      { id: "n2", type: "backpackNode", children: [] },
+    ],
+    backpack: [{ id: "n3", type: "bench", children: [], collapsed: true }],
     selectedRecipeId: RECIPES[0]?.id ?? "",
     exploring: false,
     exploringNodeId: null,
@@ -82,7 +81,7 @@ function freshState(): GameState {
     log: [],
     logSeq: 0,
     selectedId: null,
-    uid: 2,
+    uid: 3,
     dragging: false,
   }
 }
@@ -117,19 +116,12 @@ export function isSaveValid(saved: unknown): boolean {
     if (typeof node.id !== "string" || ids.has(node.id)) return false
     ids.add(node.id)
     if (typeof node.type !== "string") return false
-    if (
-      node.count !== undefined &&
-      !(typeof node.count === "number" && Number.isInteger(node.count) && node.count > 0)
-    ) {
-      return false
-    }
     if (!Array.isArray(node.children)) return false
     return node.children.every(nodeOk)
   }
   if (!Array.isArray(s.nodes) || !s.nodes.every(nodeOk)) return false
   if (!Array.isArray(s.backpack) || !s.backpack.every(nodeOk)) return false
-  if (!Array.isArray(s.hotbar) || !s.hotbar.every(nodeOk)) return false
-  // 世界自带探索;手工合成可以在世界或背包
+  // 世界自带探索与背包开关;手工合成可以在世界或背包
   const worldTypes = new Set<string>()
   const allTypes = new Set<string>()
   const collect = (ns: GameNode[], into: Set<string>) => {
@@ -142,6 +134,7 @@ export function isSaveValid(saved: unknown): boolean {
   collect(s.nodes as GameNode[], allTypes)
   collect(s.backpack as GameNode[], allTypes)
   if (!worldTypes.has("explorer")) return false
+  if (!worldTypes.has("backpackNode")) return false
   if (!allTypes.has("bench")) return false
   // uid 必须不小于已有 n<数字> id 的最大后缀,避免 newNodeId 撞 id
   let maxId = 0
@@ -154,7 +147,6 @@ export function isSaveValid(saved: unknown): boolean {
   }
   scanIds(s.nodes as GameNode[])
   scanIds(s.backpack as GameNode[])
-  scanIds(s.hotbar as GameNode[])
   if ((s.uid as number) < maxId) return false
   return true
 }
@@ -174,54 +166,111 @@ export function ensureSaveIntegrity() {
   }
 }
 
+/** 在树中按类型查找(DFS) */
+function findNodeByType(nodes: GameNode[], type: string): GameNode | null {
+  for (const n of nodes) {
+    if (n.type === type) return n
+    const hit = findNodeByType(n.children, type)
+    if (hit) return hit
+  }
+  return null
+}
+
+/**
+ * 从一组列表里"叶优先"地移除 n 个指定类型的节点。
+ * DFS 序中后代总在父节点之后,从末尾移除可保证先移除子节点。
+ * 返回实际移除的数量。
+ */
+function takeNodes(lists: GameNode[][], type: string, n: number): number {
+  const collected: Array<{ node: GameNode; owner: GameNode[] }> = []
+  const walk = (ns: GameNode[]) => {
+    for (const node of ns) {
+      if (node.type === type) collected.push({ node, owner: ns })
+      walk(node.children)
+    }
+  }
+  lists.forEach(walk)
+  let left = n
+  for (let i = collected.length - 1; i >= 0 && left > 0; i--) {
+    const { node, owner } = collected[i]
+    const idx = owner.indexOf(node)
+    if (idx >= 0) owner.splice(idx, 1)
+    left--
+  }
+  return n - left
+}
+
+/** 释放一个节点挂着的子树:能进背包的回背包根,其余回世界根 */
+function releaseChildren(node: GameNode, world: GameNode[], backpack: GameNode[]): number {
+  if (!node.children?.length) return 0
+  const orphans = node.children
+  node.children = []
+  for (const o of orphans) {
+    if (canPlaceInZone(o.type, "backpack")) backpack.push(o)
+    else world.push(o)
+  }
+  return orphans.length
+}
+
+/** 配方 × 材料状态(供 getter 使用) */
+function recipeStateOf(selectedId: string, piles: Record<string, number>) {
+  const recipe = getRecipe(selectedId)
+  if (!recipe) return null
+  const inputs = recipe.inputs.map((inp) => ({
+    stack: inp,
+    have: piles[inp.type] ?? 0,
+    ok: (piles[inp.type] ?? 0) >= inp.count,
+  }))
+  return { recipe, inputs, craftable: inputs.every((i) => i.ok) }
+}
+
 export const useGameStore = defineStore("game", {
   state: (): GameState => freshState(),
 
   getters: {
     worldNodeCount: (s) => countNodes(s.nodes),
-    /** 物品总数(物品栏+背包整棵树,递归统计) */
+    /** 物品总数(背包整棵树,每个节点计 1) */
     itemCount(): number {
       let sum = 0
       const walk = (ns: GameNode[]) => {
         for (const n of ns) {
-          sum += pileCount(n)
+          sum += 1
           walk(n.children)
         }
       }
-      walk(this.hotbar)
       walk(this.backpack)
       return sum
     },
     selectedNode: (s) => {
       if (!s.selectedId) return null
       return (
-        findNode(s.nodes, s.selectedId)?.node ??
-        findNode(s.backpack, s.selectedId)?.node ??
-        s.hotbar.find((n) => n.id === s.selectedId) ??
-        null
+        findNode(s.nodes, s.selectedId)?.node ?? findNode(s.backpack, s.selectedId)?.node ?? null
       )
     },
-    /** 各类型物品持有量(背包按整棵树递归统计) */
+    /** 各类型物品持有量(背包整棵树递归) */
     ownedMap(): Record<string, number> {
       const map: Record<string, number> = {}
       const walk = (ns: GameNode[]) => {
         for (const n of ns) {
-          map[n.type] = (map[n.type] ?? 0) + pileCount(n)
+          map[n.type] = (map[n.type] ?? 0) + 1
           walk(n.children)
         }
       }
-      walk(this.hotbar)
       walk(this.backpack)
       return map
     },
     /** 手工合成台(第一个 bench 节点,可能在世界也可能在背包) */
-    benchNode: (s) =>
-      findNodeByType(s.nodes, "bench") ?? findNodeByType(s.backpack, "bench"),
+    benchNode: (s) => findNodeByType(s.nodes, "bench") ?? findNodeByType(s.backpack, "bench"),
     explorerNode: (s) => findNodeByType(s.nodes, "explorer"),
-    /** 合成台下方挂载的材料总量 */
+    /** 合成台下方挂载的材料总量(按子树大小计) */
     benchPiles(): Record<string, number> {
       const bench = this.benchNode
-      return bench ? sumPiles(bench.children) : {}
+      if (!bench) return {}
+      const map: Record<string, number> = {}
+      for (const child of bench.children) {
+        map[child.type] = (map[child.type] ?? 0) + nodeCount(child)
+      }
+      return map
     },
     /** 当前配方 × 合成台材料状态 */
     recipeState(): ReturnType<typeof recipeStateOf> {
@@ -244,7 +293,7 @@ export const useGameStore = defineStore("game", {
     reset() {
       this.$patch(freshState())
       this.pushLog("一个崭新的世界展开了。", "info")
-      this.pushLog("点击「探索」节点,几秒后有几率发现新的地形;「手工合成」在背包里等你。", "info")
+      this.pushLog("点击「探索」节点寻找地形;点击「背包」节点开合背包分屏。", "info")
     },
 
     /**
@@ -269,11 +318,9 @@ export const useGameStore = defineStore("game", {
       return `n${++this.uid}`
     },
 
-    makeNode(type: string, count?: number): GameNode {
+    makeNode(type: string): GameNode {
       // 节点默认折叠;获得子节点时会自动展开
-      const n: GameNode = { id: this.newNodeId(), type, children: [], collapsed: true }
-      if (count != null && count > 1) n.count = count
-      return n
+      return { id: this.newNodeId(), type, children: [], collapsed: true }
     },
 
     /** 某个面板(board)的根节点列表 */
@@ -291,6 +338,9 @@ export const useGameStore = defineStore("game", {
       this.selectedId = id
       const node = hit.node
       const behavior = getDef(node.type).behavior
+
+      // 视图开关行为(如「背包」节点)由界面层处理,这里只选中
+      if (behavior?.kind === "view-toggle") return
 
       // 功能节点:按声明式行为分发,不向子节点传导
       if (behavior?.kind === "explore") {
@@ -373,159 +423,91 @@ export const useGameStore = defineStore("game", {
       this.pushLog(`节点「${def.name}」已被移除。`, "info")
     },
 
-    /** 把节点收进物品栏(按区域权限拒绝) */
+    /**
+     * 把节点收进背包:挂到背包里最近一堆同类物品下(没有则成为新的一堆)。
+     * 与背包不兼容的子节点先释放回世界。
+     */
     nodeToItem(id: string) {
       const hit = findNode(this.nodes, id) ?? findNode(this.backpack, id)
       if (!hit) return
       const def = getDef(hit.node.type)
-      if (!canPlaceInZone(def.id, "hotbar")) {
-        this.pushLog(`「${def.name}」没法收进物品栏。`, "warn")
+      if (!canPlaceInZone(def.id, "backpack")) {
+        this.pushLog(`「${def.name}」没法收进背包。`, "warn")
         return
       }
       const removed = this.detachNode(id)
       if (!removed) return
       const released = releaseChildren(removed, this.nodes, this.backpack)
       if (released > 0) this.pushLog(`${released} 个子节点被释放。`, "warn")
-      this.addPile("hotbar", removed)
-      const landed = this.hotbar.includes(removed) ? "物品栏" : "背包"
-      this.pushLog(`「${def.name}」已收回${landed}。`, "info")
+      this.stackIntoBackpack(removed)
+      this.pushLog(`「${def.name}」已收进背包。`, "info")
+    },
+
+    /** 把一个节点并入背包堆(同类挂到最近一堆下,否则成为新根) */
+    stackIntoBackpack(node: GameNode) {
+      const root = [...this.backpack].reverse().find((n) => n.type === node.type)
+      if (root) {
+        root.children.push(node)
+        if (root.collapsed) root.collapsed = false
+      } else {
+        this.backpack.push(node)
+      }
     },
 
     /**
      * 放置到世界 = "放置"语义:一次只放置一个。
-     * 材料堆:只取 1 个,余量留在储区;单件节点(工具/手工合成):整体移动,子树随行。
+     * 有子节点的堆:自己进入世界,孩子们回背包重新堆叠;单件:整体移动。
      */
     placeItem(id: string) {
-      let pile: GameNode | undefined =
-        this.hotbar.find((n) => n.id === id) ?? undefined
-      let fromHotbar = true
-      if (!pile) {
-        pile = findNode(this.backpack, id)?.node ?? undefined
-        fromHotbar = false
-      }
-      if (!pile) return
-      const type = pile.type
-      if (!canPlaceInZone(type, "world")) {
-        this.pushLog(`「${getDef(type).name}」离不开它所在的地方。`, "warn")
+      const hit = findNode(this.backpack, id)
+      if (!hit) return
+      const node = hit.node
+      if (!canPlaceInZone(node.type, "world")) {
+        this.pushLog(`「${getDef(node.type).name}」离不开它所在的地方。`, "warn")
         return
       }
-      if (pileCount(pile) > 1) {
-        // 材料堆:拆出 1 个,余量原地保留
-        pile.count = pileCount(pile) - 1
-        this.nodes.push(this.makeNode(type))
+      removeNode(this.backpack, id)
+      if (this.selectedId === id) this.selectedId = null
+      if (node.children.length > 0) {
+        const rest = node.children
+        node.children = []
+        node.collapsed = true
+        this.nodes.push(node)
+        for (const child of rest) this.stackIntoBackpack(child)
       } else {
-        if (fromHotbar) {
-          const idx = this.hotbar.findIndex((n) => n.id === id)
-          if (idx >= 0) this.hotbar.splice(idx, 1)
-        } else {
-          removeNode(this.backpack, id)
-        }
-        pile.collapsed = true
-        this.nodes.push(pile)
+        node.collapsed = true
+        this.nodes.push(node)
       }
-      this.pushLog(`「${getDef(type).name}」被放置进了世界。`, "info")
+      this.pushLog(`「${getDef(node.type).name}」被放置进了世界。`, "info")
     },
 
     // ── 物品 ─────────────────────────────────────────────
-    /** 获得物品:优先并入已有堆 → 优先进物品栏 → 溢出进背包 */
+    /**
+     * 获得物品:并入背包里最近一堆同类物品(挂为新子节点),
+     * 没有同类堆则新建一堆;进不了背包的产物(地形类)直接落世界。
+     */
     addItem(type: string, count = 1, silent = false) {
       const def = getDef(type)
-      if (!canPlaceInZone(type, "hotbar") && !canPlaceInZone(type, "backpack")) {
-        // 产物进不了任何储区(如地形类产出) → 直接落到世界根
+      if (!canPlaceInZone(type, "backpack")) {
         for (let i = 0; i < count; i++) this.nodes.push(this.makeNode(type))
       } else {
-        this.addCount("hotbar", type, count)
-        this.enforceHotbarOverflow()
+        const root = [...this.backpack].reverse().find((n) => n.type === type)
+        if (root) {
+          for (let i = 0; i < count; i++) root.children.push(this.makeNode(type))
+          if (root.collapsed) root.collapsed = false
+        } else if (count > 1) {
+          const pile = this.makeNode(type)
+          for (let i = 1; i < count; i++) pile.children.push(this.makeNode(type))
+          this.backpack.push(pile)
+        } else {
+          this.backpack.push(this.makeNode(type))
+        }
       }
       if (!silent) this.pushLog(`获得 ${def.name} ×${count}`, "gain")
     },
 
-    /** 向某储区增加数量:优先并入该区已有堆 → 背包已有堆 → 新建堆 */
-    addCount(zone: Zone, type: string, count: number) {
-      const list = this.zoneList(zone)
-      const existing = list.find((n) => n.type === type)
-      if (existing) {
-        existing.count = pileCount(existing) + count
-        return
-      }
-      if (zone === "backpack" || list.length < HOTBAR_SLOTS) {
-        list.push(this.makeNode(type, count))
-        return
-      }
-      // 物品栏满且无同类堆 → 优先并入背包已有堆,再不然才新建
-      const bpExisting = this.backpack.find((n) => n.type === type)
-      if (bpExisting) {
-        bpExisting.count = pileCount(bpExisting) + count
-      } else {
-        this.backpack.push(this.makeNode(type, count))
-      }
-    },
-
-    /** 把一个整堆节点并入储区(保留堆语义,同样优先并入已有堆) */
-    addPile(zone: Zone, pile: GameNode) {
-      const list = this.zoneList(zone)
-      const existing = list.find((n) => n.type === pile.type && n !== pile)
-      if (existing) {
-        existing.count = pileCount(existing) + pileCount(pile)
-        return
-      }
-      if (zone === "backpack" || list.length < HOTBAR_SLOTS) {
-        pile.children = []
-        list.push(pile)
-        return
-      }
-      const bpExisting = this.backpack.find((n) => n.type === pile.type && n !== pile)
-      if (bpExisting) {
-        bpExisting.count = pileCount(bpExisting) + pileCount(pile)
-      } else {
-        pile.children = []
-        this.backpack.push(pile)
-      }
-    },
-
-    /** 合并同类型堆(带子树的堆不参与,避免吞掉子树) */
-    consolidate(zone: Zone) {
-      const list = this.zoneList(zone)
-      const merged: GameNode[] = []
-      for (const n of list) {
-        if (n.children.length > 0) {
-          merged.push(n)
-          continue
-        }
-        const hit = merged.find((m) => m.type === n.type && m.children.length === 0)
-        if (hit) hit.count = pileCount(hit) + pileCount(n)
-        else merged.push(n)
-      }
-      list.splice(0, list.length, ...merged)
-    },
-
-    zoneList(zone: Zone): GameNode[] {
-      return zone === "hotbar" ? this.hotbar : this.backpack
-    },
-
-    enforceHotbarOverflow() {
-      if (this.hotbar.length > HOTBAR_SLOTS) {
-        const overflow = this.hotbar.splice(HOTBAR_SLOTS)
-        for (const pile of overflow) this.addPile("backpack", pile)
-        this.consolidate("backpack")
-        this.pushLog(
-          `物品栏已满,${overflow.map((n) => getDef(n.type).name).join("、")}转入了背包。`,
-          "warn",
-        )
-      }
-    },
-
     countItem(type: string): number {
-      let sum = 0
-      const walk = (ns: GameNode[]) => {
-        for (const n of ns) {
-          if (n.type === type) sum += pileCount(n)
-          walk(n.children)
-        }
-      }
-      walk(this.hotbar)
-      walk(this.backpack)
-      return sum
+      return this.ownedMap[type] ?? 0
     },
 
     // ── 探索(节点) ───────────────────────────────────────
@@ -534,7 +516,7 @@ export const useGameStore = defineStore("game", {
         this.pushLog(`还在探索中……(约 ${this.exploreCdLeft} 秒)`, "warn")
         return
       }
-      const b = nodeBehavior(node)?.kind === "explore" ? (nodeBehavior(node) as { kind: "explore"; durationMs?: number }) : null
+      const b = exploreBehaviorOf(node)
       this.exploring = true
       this.exploringNodeId = node.id
       this.exploreEndAt = Date.now() + (b?.durationMs ?? 5000)
@@ -551,8 +533,7 @@ export const useGameStore = defineStore("game", {
         this.explorerNode
       this.exploringNodeId = null
       if (!explorer) return
-      const raw = nodeBehavior(explorer)
-      const b = raw?.kind === "explore" ? raw : null
+      const b = exploreBehaviorOf(explorer)
       if (Math.random() >= (b?.successRate ?? 0.5)) {
         this.pushLog("这次探索一无所获。", "warn")
         return
@@ -577,7 +558,11 @@ export const useGameStore = defineStore("game", {
     craftBench(bench?: GameNode) {
       const target = bench ?? this.benchNode
       if (!target) return
-      const state = recipeStateOf(this.selectedRecipeId, sumPiles(target.children))
+      const piles: Record<string, number> = {}
+      for (const child of target.children) {
+        piles[child.type] = (piles[child.type] ?? 0) + nodeCount(child)
+      }
+      const state = recipeStateOf(this.selectedRecipeId, piles)
       if (!state) return
       const recipe = state.recipe
       const missing = state.inputs
@@ -591,16 +576,7 @@ export const useGameStore = defineStore("game", {
         return
       }
       for (const input of recipe.inputs) {
-        let left = input.count
-        for (let i = target.children.length - 1; i >= 0 && left > 0; i--) {
-          const pile = target.children[i]
-          if (pile.type !== input.type) continue
-          const have = pileCount(pile)
-          const take = Math.min(have, left)
-          left -= take
-          if (have - take > 0) pile.count = have - take
-          else target.children.splice(i, 1)
-        }
+        takeNodes([target.children], input.type, input.count)
       }
       this.addItem(recipe.output.type, recipe.output.count, true)
       this.pushLog(
@@ -612,44 +588,55 @@ export const useGameStore = defineStore("game", {
     },
 
     // ── 拖拽辅助 ─────────────────────────────────────────
-    /** 拖拽守卫:节点是否可以进入某个储区(按区域权限) */
-    canEnterZone(dragEl: HTMLElement, zone: "hotbar" | "backpack"): boolean {
-      const type = dragEl.dataset.ntype
-      if (type && !canPlaceInZone(type, zone)) return false
-      return true
-    },
-
-    /** 拖拽守卫:节点是否可以放入 board 上 owner 的子列表(区域权限 + 防环) */
+    /** 拖拽守卫:节点是否可以放入 board 上 owner 的子列表(区域权限 + 同类堆规则 + 防环) */
     canDropIntoChildList(dragEl: HTMLElement, board: BoardId, ownerId: string | undefined): boolean {
       const type = dragEl.dataset.ntype
       if (type && !canPlaceInZone(type, board)) return false
       const dragId = dragEl.dataset.nodeId
       if (!dragId || !ownerId) return true
+      const owner = findNode(this.boardRoots(board), ownerId)?.node
+      if (!owner) return true
+      // 背包里的普通物品:子级只能挂同类(堆叠规则);功能节点(合成台等)不受限
+      const ownerDef = getDef(owner.type)
+      if (board === "backpack" && !ownerDef.behavior && type && type !== owner.type) {
+        return false
+      }
       return !isAncestorOf(this.boardRoots(board), dragId, ownerId)
     },
 
     /**
-     * 节点落进储区(物品栏/背包)后的整理:
-     * 子树释放(能进背包的回背包根,其余回世界根)、同级同堆合并、物品栏超格溢出。
+     * 节点落进背包后的整理:与背包不兼容的子树释放(回世界)。
+     * 堆与堆之间不做自动合并 —— 想合并就把一堆拖到另一堆下面。
      */
-    settleStorageDrop(zone: Zone, list: GameNode[], dropped: GameNode) {
-      const released = releaseChildren(dropped, this.nodes, this.backpack)
-      if (released > 0) {
-        this.pushLog(`${released} 个子节点被释放。`, "warn")
+    settleBackpackDrop(dropped: GameNode) {
+      let released = 0
+      const filter = (ns: GameNode[]): GameNode[] => {
+        const keep: GameNode[] = []
+        for (const n of ns) {
+          if (!canPlaceInZone(n.type, "backpack")) {
+            this.nodes.push(n)
+            released++
+            continue
+          }
+          n.children = filter(n.children)
+          keep.push(n)
+        }
+        return keep
       }
-      mergeSiblings(list)
-      if (zone === "hotbar") this.enforceHotbarOverflow()
+      dropped.children = filter(dropped.children)
+      if (released > 0) this.pushLog(`${released} 个子节点被释放回世界。`, "warn")
     },
 
     /**
      * 物品堆被拖进"世界"后的结算:放置语义 = 一次只放一个,
-     * 余量退回来源储区(并入已有堆)。
+     * 余下的子节点回背包重新堆叠。
      */
-    settleWorldDrop(dropped: GameNode, fromZone: "hotbar" | "backpack") {
-      const total = pileCount(dropped)
-      if (total <= 1) return
-      dropped.count = 1
-      this.addCount(fromZone, dropped.type, total - 1)
+    settleWorldDrop(dropped: GameNode) {
+      if (dropped.children.length === 0) return
+      const rest = dropped.children
+      dropped.children = []
+      dropped.collapsed = true
+      for (const child of rest) this.stackIntoBackpack(child)
     },
 
     // ── 存档导入/导出 ────────────────────────────────────
@@ -658,7 +645,6 @@ export const useGameStore = defineStore("game", {
       return JSON.stringify({
         version: SAVE_VERSION,
         nodes: this.nodes,
-        hotbar: this.hotbar,
         backpack: this.backpack,
         selectedRecipeId: this.selectedRecipeId,
         exploring: this.exploring,
@@ -685,7 +671,6 @@ export const useGameStore = defineStore("game", {
       const s = data as Record<string, unknown>
       this.$patch({
         nodes: s.nodes as GameNode[],
-        hotbar: s.hotbar as GameNode[],
         backpack: s.backpack as GameNode[],
         selectedRecipeId: s.selectedRecipeId as string,
         exploring: s.exploring as boolean,
@@ -708,7 +693,6 @@ export const useGameStore = defineStore("game", {
     pick: [
       "version",
       "nodes",
-      "hotbar",
       "backpack",
       "selectedRecipeId",
       "exploring",
@@ -724,65 +708,8 @@ export const useGameStore = defineStore("game", {
   },
 })
 
-/** 取节点自身定义声明的行为 */
-function nodeBehavior(node: GameNode) {
-  return getDef(node.type).behavior
-}
-
-function findNodeByType(nodes: GameNode[], type: string): GameNode | null {
-  for (const n of nodes) {
-    if (n.type === type) return n
-    const hit = findNodeByType(n.children, type)
-    if (hit) return hit
-  }
-  return null
-}
-
-/** 同级同类型堆合并(只影响传入列表本身,不动子层级;带子树的堆不参与合并,避免吞掉子树) */
-function mergeSiblings(list: GameNode[]) {
-  for (let i = 0; i < list.length; i++) {
-    const a = list[i]
-    if (a.children.length > 0) continue
-    for (let j = list.length - 1; j > i; j--) {
-      const b = list[j]
-      if (b.children.length > 0) continue
-      if (a.type === b.type) {
-        a.count = pileCount(a) + pileCount(b)
-        list.splice(j, 1)
-      }
-    }
-  }
-}
-
-/** 释放一个节点挂着的子树:地形/特殊回世界根,其余回背包根 */
-function releaseChildren(node: GameNode, world: GameNode[], backpack: GameNode[]): number {
-  if (!node.children?.length) return 0
-  const orphans = node.children
-  node.children = []
-  for (const o of orphans) {
-    if (canPlaceInZone(o.type, "backpack")) backpack.push(o)
-    else world.push(o)
-  }
-  return orphans.length
-}
-
-/** 汇总一组堆节点的数量 */
-function sumPiles(nodes: GameNode[]): Record<string, number> {
-  const map: Record<string, number> = {}
-  for (const n of nodes) {
-    map[n.type] = (map[n.type] ?? 0) + pileCount(n)
-  }
-  return map
-}
-
-/** 配方 × 材料状态(供 getter 使用) */
-function recipeStateOf(selectedId: string, piles: Record<string, number>) {
-  const recipe = getRecipe(selectedId)
-  if (!recipe) return null
-  const inputs = recipe.inputs.map((inp) => ({
-    stack: inp,
-    have: piles[inp.type] ?? 0,
-    ok: (piles[inp.type] ?? 0) >= inp.count,
-  }))
-  return { recipe, inputs, craftable: inputs.every((i) => i.ok) }
+/** 取节点自身定义声明的探索行为 */
+function exploreBehaviorOf(node: GameNode) {
+  const b = getDef(node.type).behavior
+  return b?.kind === "explore" ? b : null
 }

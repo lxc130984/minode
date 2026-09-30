@@ -27,11 +27,10 @@ const children = computed(() =>
 )
 
 /** 节点当前所在区域 */
-const zone = computed<"world" | "hotbar" | "backpack" | null>(() => {
+const zone = computed<"world" | "backpack" | null>(() => {
   if (!node.value) return null
   if (findNode(game.nodes, node.value.id)) return "world"
   if (findNode(game.backpack, node.value.id)) return "backpack"
-  if (game.hotbar.some((n) => n.id === node.value!.id)) return "hotbar"
   return null
 })
 
@@ -84,7 +83,7 @@ async function removeSelected() {
             <span class="cat" :class="`cat-${def.category}`">
               {{ CATEGORY_LABELS[def.category] }}
             </span>
-            <span class="zone-tag">{{ { world: '世界中', hotbar: '物品栏', backpack: '背包' }[zone ?? 'world'] }}</span>
+            <span class="zone-tag">{{ { world: '世界中', backpack: '背包' }[zone ?? 'world'] }}</span>
             <span class="id mono">#{{ node.id }}</span>
           </div>
         </div>
@@ -142,12 +141,12 @@ async function removeSelected() {
 
       <div class="btn-row">
         <el-button
-          v-if="inWorld && canPlaceInZone(def.id, 'hotbar')"
+          v-if="inWorld && canPlaceInZone(def.id, 'backpack')"
           size="small"
           @click="game.nodeToItem(node.id)"
         >
           <PackageMinus :size="13" style="margin-right: 4px" />
-          收进物品栏
+          收进背包
         </el-button>
         <el-button
           v-if="!inWorld && canPlaceInZone(def.id, 'world')"
