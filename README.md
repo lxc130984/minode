@@ -16,8 +16,10 @@
 
 ## 文档
 
-架构与交接文档(数据模型、拖拽系统、不变量、踩坑实录、扩展指南):
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+完整的架构与交接文档(数据模型、注册表、store、拖拽系统、组件、存档、
+扩展指南、测试方法、核心不变量、踩坑实录、词汇表、部署):
+**[docs/](docs/README.md)** —— 改代码前请先读 [docs/10-invariants.md](docs/10-invariants.md)
+与 [docs/11-pitfalls.md](docs/11-pitfalls.md)。
 
 ## 技术栈
 
