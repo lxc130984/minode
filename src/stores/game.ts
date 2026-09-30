@@ -152,7 +152,10 @@ export function isSaveValid(saved: unknown): boolean {
   if (!zoneOk(s.backpack as GameNode[], "backpack")) return false
   if (!worldTypes.has("explorer")) return false
   if (!worldTypes.has("backpackNode")) return false
-  if (!allTypes.has("bench")) return false
+  // 手工合成必须留在背包(不允许在世界侧存档里残留)
+  const bpTypes = new Set<string>()
+  collect(s.backpack as GameNode[], bpTypes)
+  if (!bpTypes.has("bench")) return false
   // uid 必须不小于已有 n<数字> id 的最大后缀,避免 newNodeId 撞 id
   let maxId = 0
   const scanIds = (ns: GameNode[]) => {
