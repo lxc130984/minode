@@ -1,7 +1,32 @@
-# Tauri + Vue + TypeScript
+# minode · 节点世界
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+一个"点击 + 增量 + 文字冒险"网页游戏:一切游玩元素皆**节点**,世界与背包是两棵同构的树,核心操作只有**点击**(触发交互)与**拖拽**(组织节点树)。
 
-## Recommended IDE Setup
+> 🌐 在线游玩:<https://lxc130984.github.io/minode/>
 
-- [VS Code](https://code.visualstudio.com/) + [Vue - Official](https://marketplace.visualstudio.com/items?itemName=Vue.volar) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## 玩法一瞥
+
+- 点击**探索**节点,有几率在它下面发现森林、河流等地形
+- 空手点击**森林**可以捡到木棍和石子,自动堆进背包
+- **手工合成**节点天然生成在背包里:把材料堆整堆挂到它下面,点击即合成(如 3 石子 + 2 木棍 → 石斧)
+- 把石斧放到世界里,再把森林拖到它下面,点击**石斧**就会砍伐森林产出木头
+- 点击**背包**节点开合背包分屏;世界与背包之间自由拖拽(拖进世界 = 放置一个)
+- 背包里同类物品自动堆叠成一棵小树(显示前 4 个 + 省略号)
+- 存档自动保存在浏览器本地,支持导出/导入 JSON
+
+## 技术栈
+
+Vue 3 + TypeScript + Pinia(持久化)+ Element Plus + lucide 图标;
+节点树拖拽基于 SortableJS / vue-draggable-plus;
+桌面壳为 Tauri(本仓库同时是 Tauri 应用,`npm run tauri dev`)。
+
+## 开发
+
+```bash
+npm install
+npm run dev          # 网页开发 (http://localhost:1420)
+npm run tauri dev    # Tauri 桌面端
+npm run build        # 类型检查 + 生产构建
+```
+
+推送到 `main` 会通过 GitHub Actions 自动部署到 Pages。

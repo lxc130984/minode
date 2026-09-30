@@ -7,6 +7,8 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [vue()],
+  // GitHub Pages 项目站点部署在 /minode/ 子路径下
+  base: "/minode/",
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
