@@ -58,7 +58,9 @@ function fireFx() {
 function onRowClick() {
   game.select(props.node.id)
   if (isViewToggle.value) {
-    ui.toggleBackpack()
+    const view = def.value.behavior?.kind === "view-toggle" ? def.value.behavior.view : "backpack"
+    if (view === "codex") ui.toggleCodex()
+    else ui.toggleBackpack()
     fireFx()
     return
   }

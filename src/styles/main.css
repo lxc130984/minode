@@ -22,8 +22,6 @@
 
   --row-h: 34px;
   --topbar-h: 48px;
-  --hotbar-h: 66px;
-  --nav-h: 54px;
   --status-h: 26px;
 
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
@@ -189,49 +187,3 @@ body {
   animation: icon-pop 0.45s ease-out;
 }
 
-/* ── 底部导航 ────────────────────────────────────────── */
-.bottom-nav {
-  flex: none;
-  height: var(--nav-h);
-  display: flex;
-  align-items: stretch;
-  background: var(--bg-panel);
-  border-top: 1px solid var(--border);
-}
-.nav-item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  border: none;
-  background: transparent;
-  color: var(--fg-faint);
-  font-size: 11px;
-  cursor: pointer;
-  position: relative;
-  transition: color 0.15s;
-  padding: 0;
-}
-.nav-item svg {
-  transition: transform 0.15s;
-}
-.nav-item.on {
-  color: var(--accent);
-  font-weight: 600;
-}
-.nav-item.on svg {
-  transform: translateY(-1px);
-}
-.nav-item.on::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 26px;
-  height: 2.5px;
-  border-radius: 2px;
-  background: var(--accent);
-}

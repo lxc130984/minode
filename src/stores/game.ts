@@ -18,7 +18,6 @@ import {
   rollPool,
 } from "../game/registry"
 import type { GameNode, LogEntry, LogKind } from "../game/types"
-import { nodeCount } from "../game/types"
 import { countNodes, findNode, isAncestorOf, removeNode } from "../game/tree"
 
 const LOG_LIMIT = 200
@@ -99,6 +98,9 @@ export function isSaveValid(saved: unknown): boolean {
   if (!Array.isArray(s.discovered) || !s.discovered.every((t) => typeof t === "string")) return false
   if (typeof s.logSeq !== "number") return false
   if (!(s.selectedId === null || typeof s.selectedId === "string")) return false
+  if (!(s.exploringNodeId === null || s.exploringNodeId === undefined || typeof s.exploringNodeId === "string")) {
+    return false
+  }
   if (
     !Array.isArray(s.log) ||
     !s.log.every(
@@ -133,6 +135,10 @@ export function isSaveValid(saved: unknown): boolean {
   collect(s.nodes as GameNode[], worldTypes)
   collect(s.nodes as GameNode[], allTypes)
   collect(s.backpack as GameNode[], allTypes)
+  // 区域不变量:背包树里不应出现进不了背包的类型
+  const zoneOk = (ns: GameNode[], zone: "world" | "backpack"): boolean =>
+    ns.every((n) => canPlaceInZone(n.type, zone) && zoneOk(n.children, zone))
+  if (!zoneOk(s.backpack as GameNode[], "backpack")) return false
   if (!worldTypes.has("explorer")) return false
   if (!worldTypes.has("backpackNode")) return false
   if (!allTypes.has("bench")) return false
@@ -177,39 +183,28 @@ function findNodeByType(nodes: GameNode[], type: string): GameNode | null {
 }
 
 /**
- * 从一组列表里"叶优先"地移除 n 个指定类型的节点。
- * DFS 序中后代总在父节点之后,从末尾移除可保证先移除子节点。
- * 返回实际移除的数量。
+ * 从列表里移除 n 个指定类型的节点,"先子后父":
+ * - 递归先消耗子树里的同类节点;
+ * - 移除某个节点自身时,其剩余(异类)子节点放回上层列表原位置,不连带销毁;
+ * - 返回未满足的剩余需求(0 = 全部取到)。
  */
-function takeNodes(lists: GameNode[][], type: string, n: number): number {
-  const collected: Array<{ node: GameNode; owner: GameNode[] }> = []
-  const walk = (ns: GameNode[]) => {
-    for (const node of ns) {
-      if (node.type === type) collected.push({ node, owner: ns })
-      walk(node.children)
+function takeNodes(list: GameNode[], type: string, n: number): number {
+  for (let i = list.length - 1; i >= 0 && n > 0; i--) {
+    const node = list[i]
+    if (node.type === type) {
+      n = takeNodes(node.children, type, n)
+      if (n > 0) {
+        const rest = node.children
+        node.children = []
+        if (rest.length) list.splice(i, 1, ...rest)
+        else list.splice(i, 1)
+        n--
+      }
+    } else {
+      n = takeNodes(node.children, type, n)
     }
   }
-  lists.forEach(walk)
-  let left = n
-  for (let i = collected.length - 1; i >= 0 && left > 0; i--) {
-    const { node, owner } = collected[i]
-    const idx = owner.indexOf(node)
-    if (idx >= 0) owner.splice(idx, 1)
-    left--
-  }
-  return n - left
-}
-
-/** 释放一个节点挂着的子树:能进背包的回背包根,其余回世界根 */
-function releaseChildren(node: GameNode, world: GameNode[], backpack: GameNode[]): number {
-  if (!node.children?.length) return 0
-  const orphans = node.children
-  node.children = []
-  for (const o of orphans) {
-    if (canPlaceInZone(o.type, "backpack")) backpack.push(o)
-    else world.push(o)
-  }
-  return orphans.length
+  return n
 }
 
 /** 配方 × 材料状态(供 getter 使用) */
@@ -262,14 +257,18 @@ export const useGameStore = defineStore("game", {
     /** 手工合成台(第一个 bench 节点,可能在世界也可能在背包) */
     benchNode: (s) => findNodeByType(s.nodes, "bench") ?? findNodeByType(s.backpack, "bench"),
     explorerNode: (s) => findNodeByType(s.nodes, "explorer"),
-    /** 合成台下方挂载的材料总量(按子树大小计) */
+    /** 合成台下方挂载的材料量(按类型精确计数,每个同类节点计 1) */
     benchPiles(): Record<string, number> {
       const bench = this.benchNode
       if (!bench) return {}
       const map: Record<string, number> = {}
-      for (const child of bench.children) {
-        map[child.type] = (map[child.type] ?? 0) + nodeCount(child)
+      const walk = (ns: GameNode[]) => {
+        for (const n of ns) {
+          map[n.type] = (map[n.type] ?? 0) + 1
+          walk(n.children)
+        }
       }
+      walk(bench.children)
       return map
     },
     /** 当前配方 × 合成台材料状态 */
@@ -424,8 +423,8 @@ export const useGameStore = defineStore("game", {
     },
 
     /**
-     * 把节点收进背包:挂到背包里最近一堆同类物品下(没有则成为新的一堆)。
-     * 与背包不兼容的子节点先释放回世界。
+     * 把节点整棵收进背包(挂到最近一堆同类下,没有则成为新的一堆)。
+     * 子树分拣:同类子节点随行;背包不兼容的回世界;异类子节点释放到背包根。
      */
     nodeToItem(id: string) {
       const hit = findNode(this.nodes, id) ?? findNode(this.backpack, id)
@@ -435,9 +434,24 @@ export const useGameStore = defineStore("game", {
         this.pushLog(`「${def.name}」没法收进背包。`, "warn")
         return
       }
-      const removed = this.detachNode(id)
+      const inWorld = findNode(this.nodes, id)
+      const removed = removeNode(inWorld ? this.nodes : this.backpack, id)
       if (!removed) return
-      const released = releaseChildren(removed, this.nodes, this.backpack)
+      if (this.selectedId === id) this.selectedId = null
+      const keep: GameNode[] = []
+      let released = 0
+      for (const kid of removed.children) {
+        if (!canPlaceInZone(kid.type, "backpack")) {
+          this.nodes.push(kid)
+          released++
+        } else if (kid.type === removed.type) {
+          keep.push(kid)
+        } else {
+          this.backpack.push(kid)
+          released++
+        }
+      }
+      removed.children = keep
       if (released > 0) this.pushLog(`${released} 个子节点被释放。`, "warn")
       this.stackIntoBackpack(removed)
       this.pushLog(`「${def.name}」已收进背包。`, "info")
@@ -498,6 +512,7 @@ export const useGameStore = defineStore("game", {
         } else if (count > 1) {
           const pile = this.makeNode(type)
           for (let i = 1; i < count; i++) pile.children.push(this.makeNode(type))
+          pile.collapsed = false
           this.backpack.push(pile)
         } else {
           this.backpack.push(this.makeNode(type))
@@ -559,9 +574,13 @@ export const useGameStore = defineStore("game", {
       const target = bench ?? this.benchNode
       if (!target) return
       const piles: Record<string, number> = {}
-      for (const child of target.children) {
-        piles[child.type] = (piles[child.type] ?? 0) + nodeCount(child)
+      const walk = (ns: GameNode[]) => {
+        for (const n of ns) {
+          piles[n.type] = (piles[n.type] ?? 0) + 1
+          walk(n.children)
+        }
       }
+      walk(target.children)
       const state = recipeStateOf(this.selectedRecipeId, piles)
       if (!state) return
       const recipe = state.recipe
@@ -575,8 +594,14 @@ export const useGameStore = defineStore("game", {
         )
         return
       }
+      let unsatisfied = 0
       for (const input of recipe.inputs) {
-        takeNodes([target.children], input.type, input.count)
+        unsatisfied += takeNodes(target.children, input.type, input.count)
+      }
+      if (unsatisfied > 0) {
+        // 计数与移除口径不一致的防御:不应发生
+        this.pushLog("合成材料出现异常,已中止。", "warn")
+        return
       }
       this.addItem(recipe.output.type, recipe.output.count, true)
       this.pushLog(
@@ -605,26 +630,39 @@ export const useGameStore = defineStore("game", {
     },
 
     /**
-     * 节点落进背包后的整理:与背包不兼容的子树释放(回世界)。
+     * 节点落进背包后的整理:
+     * - 与背包不兼容的子树释放回世界;
+     * - 普通物品下只保留同类子节点(堆叠规则),异类子节点释放到背包根;
+     *   功能节点(合成台等)的子级不受同类规则限制。
      * 堆与堆之间不做自动合并 —— 想合并就把一堆拖到另一堆下面。
      */
     settleBackpackDrop(dropped: GameNode) {
-      let released = 0
-      const filter = (ns: GameNode[]): GameNode[] => {
+      let toWorld = 0
+      let toRoot = 0
+      const def = getDef(dropped.type)
+      const fix = (ns: GameNode[], parentType: string, parentFunctional: boolean): GameNode[] => {
         const keep: GameNode[] = []
         for (const n of ns) {
           if (!canPlaceInZone(n.type, "backpack")) {
             this.nodes.push(n)
-            released++
+            toWorld++
             continue
           }
-          n.children = filter(n.children)
+          const functional = !!getDef(n.type).behavior
+          if (!parentFunctional && n.type !== parentType) {
+            this.backpack.push(n)
+            toRoot++
+            continue
+          }
+          n.children = fix(n.children, n.type, functional)
           keep.push(n)
         }
         return keep
       }
-      dropped.children = filter(dropped.children)
-      if (released > 0) this.pushLog(`${released} 个子节点被释放回世界。`, "warn")
+      dropped.children = fix(dropped.children, dropped.type, !!def.behavior)
+      if (toWorld + toRoot > 0) {
+        this.pushLog(`${toWorld + toRoot} 个子节点被释放${toWorld ? "(部分回世界)" : ""}。`, "warn")
+      }
     },
 
     /**

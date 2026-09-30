@@ -125,7 +125,10 @@ async function removeSelected() {
             <span class="v">{{ handHint ?? "没有任何效果" }}</span>
           </div>
         </div>
-        <div v-if="inWorld && children.length" class="children-box">
+        <div v-if="def.noChildren" class="children-box empty">
+          <span>这是一个开关节点,不能挂载子节点。</span>
+        </div>
+        <div v-else-if="inWorld && children.length" class="children-box">
           <div class="cb-title">点击它 = 依次触发:</div>
           <div v-for="c in children" :key="c.id" class="cb-item">
             <NodeIcon :type="c.type" :size="14" />

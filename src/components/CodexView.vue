@@ -34,8 +34,9 @@ function ownedOf(type: string): number | null {
 
 function zoneLabel(def: NodeDef): string {
   const zones = zonesOf(def.id)
-  if (zones.length >= 3) return ""
-  return ` · 仅${zones.map((z) => ({ world: "世界", backpack: "背包" })[z]).join("/")}`
+  // 全区域(world+backpack)不标;受限的标"仅…"
+  if (zones.length >= 2) return ""
+  return ` · 仅${zones.map((z) => ({ world: "世界", backpack: "背包" })[z] ?? z).join("/")}`
 }
 </script>
 
