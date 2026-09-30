@@ -24,11 +24,16 @@ function stackLimit(type: string): number {
   return typeof ms === "number" && ms > 0 ? ms : Infinity
 }
 
-/** 该类型节点还能挂多少个子节点(堆容量 = maxStack - 1 自己) */
-function childCapacity(type: string): number {
-  return stackLimit(type) - 1
+/**
+ * 把 whole(整棵子树)并入 pile 后是否仍不超过堆上限。
+ * 容量按"子树总件数"判定:父 + 所有后代各计 1,
+ * 这样嵌套子堆/整堆搬运都无法绕过上限。
+ */
+function canAbsorb(pile: GameNode, whole: GameNode): boolean {
+  return nodeCount(pile) + nodeCount(whole) <= stackLimit(pile.type)
 }
 import type { GameNode, LogEntry, LogKind } from "../game/types"
+import { nodeCount } from "../game/types"
 import { countNodes, findNode, isAncestorOf, removeNode } from "../game/tree"
 
 const LOG_LIMIT = 200
@@ -468,12 +473,11 @@ export const useGameStore = defineStore("game", {
       this.pushLog(`「${def.name}」已收进背包。`, "info")
     },
 
-    /** 把一个节点并入背包堆(挂到最近一个还有空位的同类堆下,否则成为新根) */
+    /** 把一个节点整棵并入背包堆(挂到最近一个还能整堆吸收它的同类堆下,否则成为新根) */
     stackIntoBackpack(node: GameNode) {
-      const cap = childCapacity(node.type)
       const root = [...this.backpack]
         .reverse()
-        .find((n) => n.type === node.type && n.children.length < cap)
+        .find((n) => n.type === node.type && canAbsorb(n, node))
       if (root) {
         root.children.push(node)
       } else {
@@ -518,26 +522,23 @@ export const useGameStore = defineStore("game", {
       if (!canPlaceInZone(type, "backpack")) {
         for (let i = 0; i < count; i++) this.nodes.push(this.makeNode(type))
       } else {
-        // 按组堆叠:优先并入最近一个还有空位的同类堆,满了就开新堆
+        // 按组堆叠:优先并入最近一个还能吸收的同类堆,满了就开新堆
         let left = count
         while (left > 0) {
-          const cap = childCapacity(type)
-          const root = [...this.backpack]
-            .reverse()
-            .find((n) => n.type === type && n.children.length < cap)
+          const limit = stackLimit(type)
+          const root = [...this.backpack].reverse().find(
+            (n) => n.type === type && nodeCount(n) < limit,
+          )
           if (root) {
-            const take = Math.min(left, cap - root.children.length)
+            const take = Math.min(left, limit - nodeCount(root))
             for (let i = 0; i < take; i++) root.children.push(this.makeNode(type))
             left -= take
           } else {
             // 新堆:自己 + 剩余子节点(不自动展开,徽标会显示总数)
             const pile = this.makeNode(type)
-            const take = Math.min(left, cap)
-            for (let i = 1; i <= take && left > 1; i++) {
-              pile.children.push(this.makeNode(type))
-              left--
-            }
-            left--
+            const take = Math.min(left - 1, limit - 1)
+            for (let i = 0; i < take; i++) pile.children.push(this.makeNode(type))
+            left -= 1 + take
             this.backpack.push(pile)
             if (left <= 0) break
           }
@@ -659,9 +660,12 @@ export const useGameStore = defineStore("game", {
       if (!owner) return true
       const ownerDef = getDef(owner.type)
       if (board === "backpack" && !ownerDef.behavior) {
-        // 普通物品:子级只能挂同类,且堆未满
+        // 普通物品:子级只能挂同类,且并入后不超过堆上限
+        // (按子树总量判定:拖整堆、嵌套堆都无法绕过 maxStack)
         if (type && type !== owner.type) return false
-        if (owner.children.length >= childCapacity(owner.type)) return false
+        const dragNode =
+          findNode(this.nodes, dragId)?.node ?? findNode(this.backpack, dragId)?.node ?? null
+        if (dragNode && !canAbsorb(owner, dragNode)) return false
       }
       return !isAncestorOf(this.boardRoots(board), dragId, ownerId)
     },
