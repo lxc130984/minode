@@ -24,6 +24,21 @@ function stackLimit(type: string): number {
   return typeof ms === "number" && ms > 0 ? ms : Infinity
 }
 
+/** 在 roots 里找 nodeId 所属的顶层节点(堆根) */
+/**
+ * 沿同类祖先上行,找到节点所属"堆"的根。
+ * 容量必须按堆根判定:挂到堆内部任何层级(包括叶子)都算并入整堆;
+ * 堆挂在功能节点(如手工合成)下时,堆根仍是同类链的顶端,不越过功能节点。
+ */
+function stackRootOf(roots: GameNode[], node: GameNode): GameNode {
+  let current = node
+  for (;;) {
+    const parent = findNode(roots, current.id)?.parent
+    if (parent && parent.type === current.type) current = parent
+    else return current
+  }
+}
+
 /**
  * 把 whole(整棵子树)并入 pile 后是否仍不超过堆上限。
  * 容量按"子树总件数"判定:父 + 所有后代各计 1,
@@ -660,12 +675,19 @@ export const useGameStore = defineStore("game", {
       if (!owner) return true
       const ownerDef = getDef(owner.type)
       if (board === "backpack" && !ownerDef.behavior) {
-        // 普通物品:子级只能挂同类,且并入后不超过堆上限
-        // (按子树总量判定:拖整堆、嵌套堆都无法绕过 maxStack)
+        // 普通物品:子级只能挂同类,且并入后不超过堆上限。
+        // 容量以「同类链堆根」的子树总量判定 —— 挂到堆内部的任何层级
+        // (包括叶子节点、挂在功能节点下的堆)都视为并入整堆,无法绕过 maxStack;
+        // 同一堆内部的整理不改变总量,放行。
         if (type && type !== owner.type) return false
+        const fromWorld = !!findNode(this.nodes, dragId)
         const dragNode =
           findNode(this.nodes, dragId)?.node ?? findNode(this.backpack, dragId)?.node ?? null
-        if (dragNode && !canAbsorb(owner, dragNode)) return false
+        if (dragNode) {
+          const pileRoot = stackRootOf(this.backpack, owner)
+          const dragRoot = stackRootOf(fromWorld ? this.nodes : this.backpack, dragNode)
+          if (dragRoot.id !== pileRoot.id && !canAbsorb(pileRoot, dragNode)) return false
+        }
       }
       return !isAncestorOf(this.boardRoots(board), dragId, ownerId)
     },
