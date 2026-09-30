@@ -74,7 +74,7 @@ export const NODE_DEFS: NodeDef[] = shallowReactive([
     category: "functional",
     icon: "bench",
     permanent: true,
-    zones: ["world", "backpack"],
+    zones: ["backpack"],
     accent: "#8672bd",
     desc: "把材料节点挂到它下面,点击它就会按当前配方合成,产物自动进背包。它天然生成在背包里,方便整堆挂料、批量合成。",
     behavior: { kind: "craft" },
