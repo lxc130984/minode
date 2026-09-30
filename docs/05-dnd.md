@@ -1,8 +1,8 @@
 # 05 · 拖拽系统(game/dnd.ts + store 守卫)
 
 > 本项目最复杂的子系统。所有树列表(世界根/背包根/每个节点的子列表)都是
-> SortableJS 列表,共用一个 group;合法性由 `put` 守卫统一裁决;
-> 落库后的整理(settle)延迟到 `setTimeout(0)`。
+> SortableJS 列表,共用一个 group;合法性由 `put` 守卫统一裁决
+> (区域权限 / 跨区整树 / 处理上限 / 堆叠容量 / 防环)。
 
 ## 1. 参与拖拽的列表
 
@@ -54,20 +54,35 @@ SortableJS 的 `group.put(to, from, dragEl)` 每次悬停都会调用;
 
 ```
 ① 区域权限    canPlaceInZone(dragEl.dataset.ntype, board) === false → 拒绝
-② 整堆禁入世界 board==="world" && dragEl.dataset.zone==="backpack"
-              && dragEl.querySelector(":scope > ol.child-list .node-wrap")
-              → 拒绝(带子节点的父节点=整堆,防一次性放置大量物品)
+② 跨区整树禁止(双向"一次一个";带没带子树按数据判定 dragNode.children,
+   不看 DOM——折叠节点的子列表不渲染,DOM 查询会漏判):
+   ② 背包→世界 board==="world" && zone==="backpack" && 带子树 → 拒绝
+      (整堆禁入世界,放置走 placeItem 一次一个)
+   ②b 世界→背包 board==="backpack" && zone==="tree" && 带子树 → 拒绝
+      (整树禁入背包,回收一条一条来——像 MC 挖方块)
 ③ 无 owner    dragId 或 ownerId 缺失(面板根列表)→ 放行
 ④ owner 消失  findNode(boardRoots(board), ownerId) 找不到 → 放行
-⑤ 同类+容量   board==="backpack" && owner 无 behavior(普通物品):
+⑤ 处理上限    board==="world":owner.children.length + 1 > processLimit(owner.type)
+              → 拒绝(maxProcess,只数【直接】子节点——世界挂载是流程,
+              斧子只面对它的树;缺省不限;同列表内部重排不触发 put,不受影响)
+⑥ 同类+容量   board==="backpack" && owner 无 behavior(普通物品):
      a. dragEl 类型 ≠ owner 类型 → 拒绝(同类堆叠规则)
      b. 容量:pileRoot = stackRootOf(backpack, owner)   ← 沿同类祖先上行找堆根
         dragRoot = stackRootOf(拖拽节点所在板根, dragNode)
         dragRoot.id ≠ pileRoot.id                       ← 同一堆内部整理放行
           && !canAbsorb(pileRoot, dragNode)              ← nodeCount(堆根)+nodeCount(拖子树) > maxStack
         → 拒绝
-⑥ 防环        isAncestorOf(boardRoots(board), dragId, ownerId)(含自身)→ 拒绝
+⑦ 防环        isAncestorOf(boardRoots(board), dragId, ownerId)(含自身)→ 拒绝
 ```
+
+### 处理上限(maxProcess)与堆叠上限(maxStack)的对偶
+
+| | 堆叠上限 maxStack | 处理上限 maxProcess |
+|---|---|---|
+| 区域 | 背包 | 世界 |
+| 语义 | 挂载=堆叠,数**整个子树**件数 | 挂载=流程,数**直接**子节点数 |
+| 数值 | 材料 64 / 工具 1 | 石斧 1 / 水车 2 / 河流 2;缺省不限 |
+| 判定点 | 守卫⑥ + stackIntoBackpack + addItem | 守卫⑤(程序化路径不给世界上料的入口) |
 
 ### 为什么容量必须按"堆根"判定(三次翻车的结论)
 
@@ -79,43 +94,16 @@ SortableJS 的 `group.put(to, from, dragEl)` 每次悬停都会调用;
 
 ## 4. 落库处理:onTreeAdd(board, owner, list, evt)
 
-树列表的 `@add`(跨列表移入时触发)。四个动作:
+树列表的 `@add`(跨列表移入时触发)。只剩两个动作:
 
 1. **放置日志**:board=world 且来自背包 且 `owner===null`(根级落点)→
    "「xx」被放置进了世界";
-2. **自动展开 owner**:`owner?.collapsed → false`(默认折叠的节点获得可见子树);
-3. **世界拆堆**:`board==="world" && fromBackpack` →
-   `setTimeout(() => game.settleWorldDrop(target), 0)`;
-4. **背包分拣**:`board==="backpack" && !fromBackpack` →
-   `setTimeout(() => game.settleBackpackDrop(target), 0)`。
+2. **自动展开 owner**:`owner?.collapsed → false`(默认折叠的节点获得可见子树)。
 
-### settleWorldDrop(dropped)
-
-堆拖进世界(理论上已被守卫②拒绝;此函数是放置语义的兜底与 placeItem 的共享逻辑):
-children 全部 `stackIntoBackpack` 回背包,自己留在世界(collapsed=true)。
-
-### settleBackpackDrop(dropped)
-
-节点拖进背包(任意层级)后递归分拣其子树:
-
-```ts
-fix(ns, parentType, parentFunctional):
-  for n of ns:
-    !canPlaceInZone(n.type,"backpack") → push 世界根(toWorld++)
-    !parentFunctional && n.type !== parentType → push 背包根(toRoot++)   // 异类子释放
-    其余 → n.children = fix(n.children, n.type, functional(n)) → keep
-```
-
-即:进不了背包的回世界;普通物品下只保留同类子(异类释放到背包根);
-功能节点(合成台)的子级不受同类规则限制。**堆与堆之间不做自动合并**
-——玩家把一堆拖到另一堆下面就是合并(受守卫⑤容量约束)。
-
-### 为什么 settle 要 setTimeout(0)
-
-Sortable 在同一次落盘序列里还会**回写源数组**;同步修改我们的数据会被库覆盖,
-并留下 DOM/数组不一致的脏状态(历史实测:物品静默丢失、下一次拖拽失效)。
-宏任务排在 Vue 渲染 flush 与 Sortable 全部同步处理之后。
-代价:理论上有一帧闪变(整堆进世界先画全量再变 1),可接受,**勿改成 nextTick**(未验证)。
+历史上的两条"落库整理"(settleWorldDrop/settleBackpackDrop)已删除:
+守卫②/②b 按数据拒绝跨区整树后,落进背包/世界的拖拽物都只能是单节点,
+没有子树需要分拣/拆堆(曾经要 setTimeout(0) 避开 Sortable 落盘回写的
+整类问题随 settle 一起退役;详见 11-pitfalls §1.9)。
 
 ## 5. 与拖拽相关的 CSS 机制
 

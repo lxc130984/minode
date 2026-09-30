@@ -65,6 +65,7 @@ width:min(440px,94vw); max-height:76vh; z-index:60`,Transition `float`(透明度
 |---|---|
 | `def` | getDef(node.type) |
 | `selected` | game.selectedId === node.id |
+| `occupied` | 祖上有 interact/craft 工作进行(occupierOfWorkingAncestor)——流程参与物,行置灰 |
 | `children` | `Array.isArray(node.children) ? … : []` ——**瞬态帧防御**(拖拽中数据可能短暂非数组) |
 | `hasChildren` | children.length > 0 |
 | `isItemStack` | `board==="backpack" && isStack(node) && hasChildren` ——纯堆才有 ×N 徽标 |
@@ -80,10 +81,9 @@ width:min(440px,94vw); max-height:76vh; z-index:60`,Transition `float`(透明度
 ### 点击分发 onRowClick()
 
 ```
-view-toggle → 按 behavior.view 调 ui.toggleCodex()/toggleBackpack()
-              + emitTriggerFx(node.id, "ok"),return
+view-toggle → 按 behavior.view 调 ui.toggleCodex()/toggleBackpack(),return(即时)
 clickable = isFunctional || board==="world"
-clickable → game.clickNode(node.id)   ← 特效由 store 的触发结算点按结果广播
+clickable → game.clickNode(node.id)   ← 触发 = 开始工作,行底进度条随之填充
 否则(背包里的普通节点)→ 无反应
 ```
 
@@ -91,20 +91,21 @@ clickable → game.clickNode(node.id)   ← 特效由 store 的触发结算点�
 `selectedId` 只由行尾「详情 / 选择配方」按钮设置,用于联动检查器——
 `.selected` 高亮只在这个意义上出现。
 
-**触发特效**:NodeItem 订阅 `triggerFxOf(node.id)`(game/fx.ts 事件总线,
-store 在每条触发结算路径广播 ok/fail)。watch 收到事件后复位→rAF→强制
-reflow(读行元素 offsetWidth)→置真,播放 CSS 动画(`.fx-ok` 一道该类型
-accent 色波左→右扫过 / `.fx-fail` 灰波),1350ms 后清类;连发(含动画刚
-结束的窗口)都能从头重播。组件卸载时 clearTriggerFx 清掉自己的条目。
+**工作进度条**:NodeItem 计算 `workOf(node.id)`(game/work.ts 的 reactive
+Map,Vue 按键追踪只触达本行)。有工作 → 行底渲染 `.work-track`(2px 细线,
+该类型 accent 色 85% 透明度),`animation-duration` 内联 = 剩余工作时间,
+CSS `scaleX(0→1)` 匀速填满,到点结算后随工作记录清除而消失。纯 CSS,
+无 JS 帧驱动;忙碌中再点由 store 拦截(warn"还在忙碌中"),不重启进度条。
 
 ### 行内元素(从左到右)
 
 twisty(无子/无 noChildren 时隐藏)→ NodeIcon → 名称(def.accent 着色)→
-副标题(bench:配方·xx / explorer 探索中:倒计时秒 / view-toggle:已开启·已收起
+副标题(bench:配方·xx / view-toggle:已开启·已收起
 (带 PanelRight 图标,读 ui.backpackOpen)/ auto-trigger:每 N 秒驱动(cyan)或
 需挂在河流下面(orange)/ 普通节点:分类小标签)→
-flex 填充 → ×N 徽标(isItemStack)或子数胶囊 → 行尾按钮(bench 专属 ⚙ 选择配方;
-通用 ⋯ 详情打开检查器)。
+flex 填充 → ×N 徽标(isItemStack)或子数胶囊(世界里声明了 maxProcess 的
+节点显示 N/M,如石斧 1/1、水车 2/2)→ 行尾按钮(bench 专属 ⚙ 选择配方;
+通用 ⋯ 详情打开检查器)→ 工作中:行底 `.work-track` 进度线。
 
 ### 子列表
 
@@ -129,6 +130,8 @@ flex 填充 → ×N 徽标(isItemStack)或子数胶囊 → 行尾按钮(bench �
 
 - `.row-main`:全宽、无边框、无垂直间隙、`user-select:none`、左 2px 透明边
   (检查器联动时染 accent)、悬停/按下高亮;触屏行高经 `@media (hover:none){:root{--row-h:40px}}` 放大。
+- `.row-main.occupied`:整行 opacity .55——祖上工作期间流程参与物的置灰态
+  (点击由引擎拦下并提示"正被占用");不拦拖拽(硬拖走=工作结算时找不到目标,自然作废)。
 - `.child-list`:缩进 18px + 左引导线;`.is-empty` 不画线(避免残留短竖线——历史 bug)。
 - `.stack-list > .node-wrap:nth-child(n+5){display:none}`(占位隐藏,保索引)。
 - 咬合区与投放提示文案("↳ 挂为子节点")只在 `.app.dragging` 下出现。
@@ -196,7 +199,7 @@ accent 是自定义节点材质/配色的入口。
   字体(--mono / --sans)、--radius / --shadow。
 - Element Plus 主色对齐:`--el-color-primary: var(--accent)` 等一组覆盖。
 - `.row-main/.slot/.draggable` 的 `user-select:none`(需求:拖动对象禁文字选中)。
-- 触发特效 keyframes:`fx-ok`(accent 色波左→右扫过)、`fx-fail`(灰波);
-  事件源 game/fx.ts,详见 14 §5。
+- 工作进度条 `.work-track`:行底 2px 细线,accent 色 85% 透明度,scaleX 匀速
+  填充(时长 = 剩余工作);数据源 game/work.ts,详见 14 §5。
 - 拖拽反馈:`.sortable-ghost`(占位半透明)、`.sortable-fallback`(虚影,见 05 §2)。
 - 历史遗留清理:底部导航/物品栏样式已删;新增界面前先确认变量没有孤儿引用。

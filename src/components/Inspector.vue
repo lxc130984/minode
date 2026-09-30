@@ -11,7 +11,8 @@ import {
 import { findInteraction, getDef, getRecipe, canPlaceInZone, isPermanent } from "../game/registry"
 import { CATEGORY_LABELS, nodeCount } from "../game/types"
 import { findNode } from "../game/tree"
-import { autoTriggerBehaviorOf, autoTriggerReady, useGameStore } from "../stores/game"
+import { workOf } from "../game/work"
+import { autoTriggerBehaviorOf, autoTriggerReady, gameNow, useGameStore } from "../stores/game"
 import { useUiStore } from "../stores/ui"
 import NodeIcon from "./NodeIcon.vue"
 
@@ -20,6 +21,11 @@ const ui = useUiStore()
 
 const node = computed(() => game.selectedNode)
 const def = computed(() => (node.value ? getDef(node.value.type) : null))
+/** 节点当前的工作(探索等):状态展示用;剩余秒走 gameNow 逐秒刷新 */
+const work = computed(() => (node.value ? workOf(node.value.id) : undefined))
+const workLeftSec = computed(() =>
+  work.value ? Math.ceil(Math.max(0, work.value.endAt - gameNow.value) / 1000) : 0,
+)
 
 /** 瞬态帧防御:children 可能短暂非数组 */
 const children = computed(() =>
@@ -104,7 +110,7 @@ async function removeSelected() {
       <div v-if="node.type === 'explorer'" class="stat-box">
         <div class="stat-row">
           <span class="k">状态</span>
-          <span class="v">{{ game.exploring ? `探索中……约 ${game.exploreCdLeft}s` : "待命" }}</span>
+          <span class="v">{{ work ? `探索中……约 ${workLeftSec}s` : "待命" }}</span>
         </div>
         <div class="stat-row">
           <span class="k">已发现地形</span>
@@ -132,6 +138,10 @@ async function removeSelected() {
           <span class="k">驱动间隔</span>
           <span class="v">每 {{ Math.round(autoTrigger.intervalMs / 1000) }} 秒一次</span>
         </div>
+        <div v-if="typeof def?.maxProcess === 'number'" class="stat-row">
+          <span class="k">处理上限</span>
+          <span class="v mono">{{ children.length }} / {{ def.maxProcess }}</span>
+        </div>
         <div class="stat-row">
           <span class="k">状态</span>
           <span class="v">{{ autoReady ? "驱动中" : "待就位(不在河流下面)" }}</span>
@@ -149,7 +159,9 @@ async function removeSelected() {
         <div v-if="inWorld" class="stat-box">
           <div class="stat-row">
             <span class="k">子节点</span>
-            <span class="v mono">{{ children.length }}</span>
+            <span class="v mono">
+              {{ children.length }}{{ typeof def.maxProcess === "number" ? ` / ${def.maxProcess}` : "" }}
+            </span>
           </div>
           <div class="stat-row">
             <span class="k">空手点击</span>

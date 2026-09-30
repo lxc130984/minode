@@ -1,6 +1,6 @@
 # 04 · 状态层(src/stores/)
 
-> 两 个 store:`game`(全部游戏状态与动作,932 行)与 `ui`(界面开关,28 行)。
+> 两 个 store:`game`(全部游戏状态与动作,943 行)与 `ui`(界面开关,28 行)。
 > 另有一个模块级响应式时钟 `gameNow` 与若干模块级纯函数。
 
 ## 1. game store 总览
@@ -13,11 +13,12 @@ export const useGameStore = defineStore("game", { state, getters, actions, persi
 
 | 导出 | 说明 |
 |---|---|
-| `SAVE_VERSION = 5` | 存档结构版本;不匹配的存档自动重置(迁移策略见 07) |
+| `SAVE_VERSION = 6` | 存档结构版本;不匹配的存档自动重置(迁移策略见 07) |
 | `SAVE_KEY = "game"` | localStorage 键(persist.key 与之共用) |
 | `gameNow: Ref<number>` | 游戏时钟(见 §1.4) |
 | `autoTriggerBehaviorOf(node)` | 取节点 def 声明的自触发行为;非自触发节点返回 null(组件用它判断"要不要显示驱动状态") |
 | `autoTriggerReady(b, parent)` | 自触发节点是否已就位:直接挂在 `poweredBy` 指定的类型下(缺省 = 恒就位)。**驱动判定与界面状态共用这一处口径** |
+| `occupierOfWorkingAncestor(roots, node)` | 节点是否被占用:沿祖先上行找有 interact/craft 工作进行的祖先(如石斧正在砍的森林),返回它或 null。**触发前置检查与 NodeItem 行置灰共用这一处口径** |
 | `BoardId = "world" \| "backpack"` | 面板标识;`boardRoots(board)` 返回对应根数组 |
 | `isSaveValid(saved)` | 存档深度校验(见 07 §2) |
 | `ensureSaveIntegrity()` | 启动时清掉不合规存档(main.ts 在 pinia 之前调用) |
@@ -32,6 +33,8 @@ export const useGameStore = defineStore("game", { state, getters, actions, persi
 | `findNodeByType(nodes, type)` | DFS 按类型找第一个 |
 | `takeNodes(list, type, n)` | **叶优先**移除 n 个同类节点,返回未满足数;移除父节点时其异类剩余子节点 splice 回上层原位置(不连带销毁) |
 | `recipeStateOf(selectedId, piles)` | 配方 × 材料状态:`{recipe, inputs:[{stack,have,ok}], craftable}` |
+| `countPiles(children)` | 统计子树材料 `type→件数`(每个同类节点计 1,与 takeNodes 消耗同口径;benchPiles getter / craft 预检与复核共用) |
+| `missingOf(state)` / `craftMissingMsg(missing)` | 配方缺料描述列表(state 无效为 null)/ "材料不足"日志文案的唯一来源 |
 | `exploreBehaviorOf(node)` | 取节点自身 def 的 explore 行为(非 explore 返回 null) |
 | `autoTriggerAt` | 模块级 Map(node id → 下一次驱动时间戳 ms):见 §1.4。store 外、不落盘 |
 
@@ -43,9 +46,6 @@ export const useGameStore = defineStore("game", { state, getters, actions, persi
 | `nodes` | GameNode[] | ✓ | 世界树根列表 |
 | `backpack` | GameNode[] | ✓ | 背包树根列表 |
 | `selectedRecipeId` | string | ✓ | 手工合成当前配方(默认 RECIPES[0]) |
-| `exploring` | boolean | ✓ | 探索进行中(全局唯一冷却) |
-| `exploringNodeId` | string\|null | ✓ | 发起探索的节点 id——结算归属(多探索节点) |
-| `exploreEndAt` | number | ✓ | 探索截止时间戳(ms) |
 | `startedAt` | number | ✓ | 本局开始时间(playSeconds = now-startedAt) |
 | `discovered` | string[] | ✓ | 已发现地形类型(图鉴点亮) |
 | `log` | LogEntry[] | ✓ | 日志,上限 200(超出从头裁剪) |
@@ -71,21 +71,24 @@ pinia-plugin-persistedstate 会对**每次 mutation** 全量序列化写 localSt
 放在 store 外的 ref 里,getters 引用 `gameNow.value` 仍具响应性,
 但不再触发持久化。`playSeconds` 也因此不落盘(由 startedAt 推算)。
 
-`onClock()` 里的探索结算是:`exploring && now >= exploreEndAt → resolveExplore()`
-(此外它还会驱动自触发节点,见 §2.7)。
-后台标签页定时器被浏览器节流 → 结算延迟到回前台(时间戳驱动,自动对账,设计内)。
+`onClock()` 里做两类"到点对账":**工作结算**(§1.5,`now >= job.endAt →
+resolveWork`)与自触发驱动(§2.7)。setTimeout 负责前台准点结算,
+这里兜后台节流的迟到(时间戳驱动,自动对账,只补一次不做离线补算)。
 
 **同理,自触发计时表 `autoTriggerAt` 也在 store 之外**(模块级 Map,见 §1.2):
 它每秒都可能变化,放进 state 等于每秒一次全量写盘;它也不该落盘——
 刷新/导入存档后重新计时,玩家不会因为挂机时间长短得到意外的产出。
 
-### 1.5 触发特效事件总线(game/fx.ts,store 外)
+### 1.5 工作系统(game/work.ts,store 外)
 
-瞬态视觉状态,与 gameNow/autoTriggerAt 同理不进 store、不落盘。
-store 的每个触发结算点 `emitTriggerFx(nodeId, "ok" | "fail")` 写入
-`reactive Map`(Vue 的 Map 按键追踪,写入只触达订阅对应节点的行);
-NodeItem `watch(triggerFxOf(node.id))` 播放水平渐变动画,行卸载时
-`clearTriggerFx` 清条目。详见 14 §5.2。
+**触发 ≠ 瞬时结算**:点击可交互节点 = 让它开始做事,做事需要时间
+(workMs),到点才结算。工作中(忙碌)的节点再次触发无效。
+工作的记录是模块级 `reactive Map<nodeId, WorkJob>`(`{kind, endAt,
+durationMs, silent}`),不进 store、不落盘(同 gameNow 理由:endAt 每拍
+逼近,不能引发存档写盘;刷新后进行中的工作作废重头,不折算挂机产出)。
+Vue 的 Map 按键追踪,写入只触达对应行的进度条。节点在 `NodeDef.workMs`
+声明时长(缺省 `DEFAULT_WORK_MS=1500`;探索以 behavior.durationMs 为准)。
+`reset()/applySaveData` 时 `clearAllWork` 全清。
 
 ### 1.6 getters
 
@@ -99,7 +102,6 @@ NodeItem `watch(triggerFxOf(node.id))` 播放水平渐变动画,行卸载时
 | `explorerNode` | 世界找 explorer |
 | `benchPiles` | 合成台子级材料 `type→件数`,**按类型精确计数(每个同类节点计 1)**——与 takeNodes 消耗口径严格一致 |
 | `recipeState` | recipeStateOf(selectedRecipeId, benchPiles) |
-| `exploreCdLeft` | 探索剩余秒(ceil,基于 gameNow) |
 | `playSeconds` | 游玩秒数 |
 | `lastLog` | 最新一条日志 |
 
@@ -107,29 +109,48 @@ NodeItem `watch(triggerFxOf(node.id))` 播放水平渐变动画,行卸载时
 
 ### 2.1 基础
 
-- **reset()** — `$patch(freshState())` + 两条欢迎日志。存档重置/新档入口。
-- **onClock()** — 每秒心跳的入口:探索到点结算(§2.5)+ 自触发驱动(§2.7)。
+- **reset()** — `$patch(freshState())` + `clearAllWork()` + 两条欢迎日志。存档重置/新档入口。
+- **onClock()** — 每秒心跳的入口:工作到点对账结算(§1.5)+ 自触发驱动(§2.7)。
 - **pushLog(text, kind="info")** — 追加日志,超 200 裁头。kind 决定颜色(gain 绿/craft 紫/warn 橙/info 灰)。
 - **newNodeId() / makeNode(type)** — 造节点:`{id:"n"+ ++uid, type, children:[], collapsed:true}`。
 - **boardRoots(board)** — world→nodes,backpack→backpack。
 - **select(id)** — 设置 selectedId。
 
-### 2.2 点击与交互
+### 2.2 点击与交互(工作系统)
 
 - **clickNode(id)** — 点击入口:世界∪背包查找(找不到直接 return)→ `triggerNode(node)`。
   **不再设置 selectedId**(节点是可拖动的按钮,没有点击选中态)。
-- **triggerNode(node, silent=false)** — **唯一的"触发一个节点"口径**,点击与时钟驱动都走它:
-  1. 读 def.behavior:`view-toggle` → 不分发(界面层处理);`explore` → `startExplore(node)`;`craft` → `craftBench(node)`;`auto-trigger` → `driveAutoTrigger(node, silent)`;其他 behavior → 静默;
-  2. 无 behavior(普通节点):有子 → 自身 emit fx ok(点击落地),再逐子
-     `emitTriggerFx(child.id, trigger(node.type, child.type, silent))`;叶子 →
-     `emitTriggerFx(node.id, trigger("hand", node.type, silent))`。
-     子节点按各自交互结果点亮/变灰,视觉是沿树传播的瀑布流。
-- **trigger(source, target, silent=false): "ok" | "fail"** — 查交互表并**返回结算结果**:
-  无条目 → "没有效果"warn + `fail`;results 空 → 纯 note + `ok`;
-  掷骰全空 → "一无所获"warn + `ok`(交互有效,只是运气);命中 → 逐 drop `addItem`(随后打 note)+ `ok`。
+- **triggerNode(node, silent=false)** — **唯一的"触发一个节点"口径**,点击与时钟驱动都走它。
+  触发 = **开始工作**(§1.5),不是瞬时结算;但先做**前置检查**——
+  注定没有效果的触发立即拒绝/回应,不白等工作时长(用户明确要求):
+  1. `view-toggle` → 不分发(界面层即时处理,不受忙碌/占用影响);
+  2. **忙碌**:`workOf(node.id)` 已有工作 → "「xx」还在忙碌中……"warn;
+  3. **占用**:`occupierOfWorkingAncestor` 命中(祖上有 interact/craft 工作进行,
+     本节点是流程参与物,如石斧正在砍的森林)→ "「xx」正被「yy」占用着"warn;
+  4. `auto-trigger` → `driveAutoTrigger(node, silent)`(驱动子节点开始各自的工作);
+     其他未知 behavior → 静默;
+  5. **可做性**:
+     - craft:预检材料(`countPiles` + `recipeStateOf`),缺料 → 立即"材料不足"warn
+       (到点结算时 craftBench 还会按**工作快照的配方**复核,防期间切配方/抽料);
+     - interact 有子:任一子节点在交互表有条目才开工,否则立即
+       "对下面的节点似乎都产生不了什么效果"warn;
+     - interact 叶子:`findInteraction("hand", …)` 无条目或纯风味(无产出)→
+       立即回应提示/风味文本,不耗时(空手摸一把没有"工作"可言);
+     - explore:无前置(冷却即工作本身);
+  6. 通过 → `startWork(挂工作)` + `setTimeout(resolveWork, duration)`;
+     craft 工作快照 `recipeId = selectedRecipeId`。
+     时长:探索取 behavior.durationMs ?? workMs ?? 1500;其余取 workMs ?? 1500。
+  以上拒绝在 silent(自动驱动)时都不打日志、静默跳过。
+- **resolveWork(nodeId)** — 工作到点的**唯一结算入口**(setTimeout 准点调用,
+  onClock 对账补迟到):摘除工作记录 → `dragging` 中不结算(等下一拍)→
+  节点已不在树上则工作作废 → 按工作种类分发:
+  `explore` → `finishExplore(node)`;`craft` → `craftBench(node)`;
+  `interact` → 有子逐子 `trigger(node.type, child.type, silent)`,叶子 `trigger("hand", …)`。
+- **trigger(source, target, silent=false)** — 查交互表并结算一次交互:
+  无条目 → "没有效果"warn;results 空 → 纯 note;
+  掷骰全空 → "一无所获"warn;命中 → 逐 drop `addItem`(随后打 note)。
   `silent`(由自动驱动传入)只保留 `addItem` 的产出日志,风味/警告/"一无所获"一律不打——
   每 3 秒一次的背景行为不该把 200 条日志上限刷掉(I-12 同款取向:别打扰玩家)。
-  **fx 广播不受 silent 压制**(自动驱动也要看得见)。
 
 ### 2.3 树操作
 
@@ -139,11 +160,10 @@ NodeItem `watch(triggerFxOf(node.id))` 播放水平渐变动画,行卸载时
 
 ### 2.4 收纳 / 放置 / 堆叠(语义最密集的一组)
 
-- **nodeToItem(id)** — "收进背包"(检查器按钮):
+- **nodeToItem(id)** — "收进背包"(检查器按钮),与跨区拖拽同一条规矩"一次一个":
   1. `canPlaceInZone(type,"backpack")` 拒绝不兼容(地形);
-  2. `removeNode` 从所在树摘下(**不走 detachNode**,避免子节点散落回世界根);
-  3. 子树分拣:同类子随行;`!canPlaceInZone(kid,"backpack")` → 世界根;异类 → 背包根;
-  4. `stackIntoBackpack(removed)` 并入背包堆(整棵,受容量约束)。
+  2. 节点还挂着子节点 → 拒绝并提示"先把它们移走,一条一条回收";
+  3. `removeNode` 摘下 → `stackIntoBackpack(removed)` 并入背包堆。
 - **stackIntoBackpack(node)** — 在背包根从后往前找第一个
   `同类型 && canAbsorb` 的堆挂进去;没有 → 成为新根。
 - **placeItem(id)** — "放置到世界"(检查器/双击,一次只放一个):
@@ -162,31 +182,35 @@ NodeItem `watch(triggerFxOf(node.id))` 播放水平渐变动画,行卸载时
 
 ### 2.5 探索
 
-- **startExplore(node)** — 全局冷却中 → "还在探索中"warn + fx fail;否则
-  `exploring=true; exploringNodeId=node.id; exploreEndAt=now+(行为.durationMs ?? 5000)` + 日志 + fx ok。
-- **resolveExplore()**(由 onClock 到点触发)—
-  1. `exploring=false`;
-  2. 结算目标:`exploringNodeId` 查世界→背包,**兜底 explorerNode**;清空 exploringNodeId;
-  3. `Math.random() >= 行为.successRate` → "一无所获" + fx fail;
-  4. `rollPool(行为.pool)` 选地形 → `explorer.children.push(makeNode)`;
+探索已收编进工作系统(§2.2):点击探索节点 = 挂一条 kind="explore" 的工作
+(时长 = durationMs ?? workMs ?? 1500,内置 explorer 为 5000),期间行底
+进度条填充、节点忙碌;出发时打"你向着未知出发……"(silent 不打)。
+
+- **finishExplore(explorer)**(由 resolveWork 到点调用,按发起节点结算 I-7)—
+  1. `Math.random() >= 行为.successRate` → "这次探索一无所获"warn;
+  2. `rollPool(行为.pool)` 选地形 → `explorer.children.push(makeNode)`;
      **explorer.collapsed=false(展开让玩家看见)**;
-  5. discovered 去重追加 + "探索成功"日志 + fx ok。
+  3. discovered 去重追加 + "探索成功"日志。
 
 ### 2.6 手工合成
 
 - **selectRecipe(id)** — getRecipe 存在才生效;切换 + 日志。
-- **craftBench(bench?)** — `target = bench ?? benchNode`:
-  1. **计料**:DFS target.children,`piles[type]++`(每个节点计 1,与消耗同口径);
-  2. recipeStateOf 校验;缺料 → "材料不足:xxx(缺 N)"warn + fx fail 并返回;
+- **craftBench(bench?)**(由 resolveWork 到点调用——点击合成台先挂
+  kind="craft" 的工作,bench 默认 2000ms;缺料在挂工作**前**已被预检拦下,
+  这里是到点结算时的**复核**,防工作期间材料被抽走)—
+  `target = bench ?? benchNode`:
+  1. **计料**:`countPiles(target.children)`(每个同类节点计 1,与消耗同口径);
+  2. `recipeStateOf` + `missingOf` 校验;缺料 → "材料不足"warn 并返回;
   3. **消耗**:逐 input `takeNodes(target.children, input.type, input.count)`;
-     若有未满足(计数与移除口径不一致的防御,不应发生)→ "材料出现异常,已中止" + fx fail;
-  4. `addItem(output, silent=true)` + "合成成功"craft 日志 + fx ok。
+     若有未满足(计数与移除口径不一致的防御,不应发生)→ "材料出现异常,已中止";
+  4. `addItem(output, silent=true)` + "合成成功"craft 日志。
 
 ### 2.7 自触发驱动(水车等)
 
-- **driveAutoTrigger(node, silent=false)** — 自身 emit fx ok(被驱动的心跳脉冲),
-  再依次 `triggerNode(child, silent)` 触发该节点的每个子节点
-  (水车 → 石斧 → 森林)。手动点击水车 = 立即驱动一次(带完整风味日志);到点自动驱动 = silent。
+- **driveAutoTrigger(node, silent=false)** — 依次 `triggerNode(child, silent)`:
+  被驱动的子节点各自开始工作(水车 → 石斧(2s)→ 结算砍柴 → 木头)。
+  手动点击水车 = 立即驱动一次(带完整风味日志);到点自动驱动 = silent。
+  水车 3s 驱动间隔 > 石斧 2s 工作时长,节奏刚好衔接;子节点忙碌中则该次驱动落空。
 - **tickAutoTriggers()** — 由 onClock 每秒调用:
   1. `dragging` 中整体跳过(避免与 Sortable 的落盘序列抢写);
   2. DFS 世界 + 背包,逐个判断"已就位"(`autoTriggerReady`):
@@ -197,13 +221,10 @@ NodeItem `watch(triggerFxOf(node.id))` 播放水平渐变动画,行卸载时
 
 ## 3. 拖拽相关 action(与 05-dnd 配套阅读)
 
-- **canDropIntoChildList(dragEl, board, ownerId)** — 拖拽总守卫,详见 05 §3。
-- **settleWorldDrop(dropped)** — 堆拖进世界后的延迟结算:
-  children 全部 `stackIntoBackpack` 回背包,自己留世界(collapsed=true)。
-- **settleBackpackDrop(dropped)** — 节点拖进背包后的延迟整理:
-  递归分拣 dropped 子树——`!canPlaceInZone(n,"backpack")` → 世界根;
-  普通物品父的非同类子 → 背包根;功能节点的子级不限制。
-  **不做堆合并**(玩家手动拖堆合并)。
+- **canDropIntoChildList(dragEl, board, ownerId)** — 拖拽总守卫,详见 05 §3:
+  区域权限 / 跨区整树禁止(双向一次一个) / 世界处理上限(直接子节点数)/
+  背包同类+堆叠容量(堆根子树总量)/ 防环。
+  (历史上的 settleWorldDrop/settleBackpackDrop 落库整理已随守卫收紧删除,见 05 §4。)
 
 ## 4. 存档 action(详见 07-save)
 
@@ -214,8 +235,7 @@ NodeItem `watch(triggerFxOf(node.id))` 播放水平渐变动画,行卸载时
 
 ```ts
 persist: { key: SAVE_KEY, pick: [version, nodes, backpack, selectedRecipeId,
-  exploring, exploringNodeId, exploreEndAt, startedAt, discovered,
-  log, logSeq, selectedId, uid] }   // dragging 不持久化
+  startedAt, discovered, log, logSeq, selectedId, uid] }   // dragging/工作 不持久化
 ```
 
 ## 6. ui store(src/stores/ui.ts,28 行)

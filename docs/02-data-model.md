@@ -19,7 +19,7 @@ export interface GameNode {
 | `id` | 形如 `"n<数字>"`,由 store 的 `newNodeId()` 发号(`n${++uid}`)。**全局唯一**,是 findNode/removeNode/selectedId/防环判定的键。存档校验要求 `uid ≥ 所有 id 的最大数字后缀`(防撞号)。 |
 | `type` | 指向 registry 里 `NodeDef.id`。未知 type 由 `getDef()` 返回兜底定义(见 03 §2.4)。 |
 | `children` | 子节点数组。**必须始终是数组**——渲染层对"瞬态帧非数组"做了防御(NodeItem/Inspector 的 computed 兜底),但 store 层的所有路径都应保证这一点。 |
-| `collapsed` | 折叠态。`makeNode()` 造出默认 `true`(默认折叠);三个自动展开时机:①拖入子节点(onTreeAdd 中 `owner.collapsed=false`)②探索产出地形(resolveExplore)③手工合成相关无需。**获得物品 addItem 不展开堆**(玩家折叠态保持,徽标显示总数——需求方明确要求)。 |
+| `collapsed` | 折叠态。`makeNode()` 造出默认 `true`(默认折叠);三个自动展开时机:①拖入子节点(onTreeAdd 中 `owner.collapsed=false`)②探索产出地形(finishExplore)③手工合成相关无需。**获得物品 addItem 不展开堆**(玩家折叠态保持,徽标显示总数——需求方明确要求)。 |
 
 ### 1.1 数量语义(关键!)
 
@@ -97,6 +97,8 @@ export interface NodeDef {
 | `zones` | `NodeZone[]` | `zonesOf()→canPlaceInZone()` | 允许存在的区域,细粒度。如 bench `["backpack"]`。**缺省规则**:显式 zones 优先;否则 worldOnly→`["world"]`;否则全部区域。**拖拽守卫/收纳/放置/存档校验全部经 canPlaceInZone,勿绕过** |
 | `noChildren` | boolean | NodeItem | 不渲染 twisty 与子列表 = 不可挂子节点、不可折叠(背包节点)。"可被挂到其他节点上"不受影响 |
 | `maxStack` | number | stackLimit→canAbsorb/addItem/守卫 | 一堆同类物品最大件数(父+子)。缺省=∞。材料 64、石斧 1 |
+| `workMs` | number | triggerNode→startWork | 工作时长:触发后要做事多久才结算(期间忙碌+行底进度条)。缺省=store 的 DEFAULT_WORK_MS(1500);探索以 behavior.durationMs 为准 |
+| `maxProcess` | number | processLimit→拖拽守卫规则⑤ | 处理上限:世界区最多同时挂几个【直接】子节点(流程语义——斧子只面对它的树,不数子子节点)。缺省=∞。石斧 1 / 水车 2 / 河流 2 |
 | `permanent` | boolean | removeNodeById | 不可移除(探索/背包节点/手工合成) |
 | `behavior` | NodeBehavior | clickNode 分发 / 守卫(功能性判定) | 见 §3。**有 behavior 的节点叫"功能节点"**,其背包子级不受同类堆叠规则限制 |
 | `slots` | SlotSpec[] | (预留,未实现) | 结构化子槽位,如未来工厂的"输入/输出" |
@@ -125,11 +127,17 @@ export type NodeBehavior =
 
 | 行为 | 定义 | 触发时(store.triggerNode) | 点击时(界面层 NodeItem) |
 |---|---|---|---|
-| `explore` | `{ kind, durationMs, successRate, pool: {type, weight}[] }` | `startExplore(node)`——参数从**被触发节点自身**的 def 读取 | 任何面板都触发 + fx 动画 |
-| `craft` | `{ kind }` | `craftBench(node)`——以被触发节点为合成台 | 同上;行尾显示 ⚙ 配方按钮 |
+| `explore` | `{ kind, durationMs, successRate, pool: {type, weight}[] }` | 挂 kind="explore" 的工作(时长=durationMs),到点 `finishExplore(node)`——参数从**被触发节点自身**的 def 读取 | 任何面板都触发,行底进度条填充 |
+| `craft` | `{ kind }` | 挂 kind="craft" 的工作(workMs),到点 `craftBench(node)`——以被触发节点为合成台 | 同上;行尾显示 ⚙ 配方按钮 |
 | `factory` | `{ kind, inputs, outputs, intervalMs }` | 静默 return(暂无语义) | — |
-| `auto-trigger` | `{ kind, intervalMs, poweredBy? }` | `driveAutoTrigger(node)`——依次触发自身每个子节点(手动 "转一圈") | 同上;行内显示就位状态副标题 |
-| `view-toggle` | `{ kind, view: "backpack" \| "codex" }` | **不分发**(界面层处理) | 按 `behavior.view` 调 ui.toggleBackpack/toggleCodex |
+| `auto-trigger` | `{ kind, intervalMs, poweredBy? }` | `driveAutoTrigger(node)`——依次触发自身每个子节点(手动 "转一圈";子节点各自开始工作) | 同上;行内显示就位状态副标题 |
+| `view-toggle` | `{ kind, view: "backpack" \| "codex" }` | **不分发**(界面层即时处理,不走工作) | 按 `behavior.view` 调 ui.toggleBackpack/toggleCodex |
+
+普通节点(无 behavior)同样走工作:挂 kind="interact" 的工作(时长 workMs),
+到点结算交互——有子逐子 `trigger(自身, child)`,叶子 `trigger("hand", 自身)`。
+触发有**前置检查**(忙碌/被祖先占用/可做性——缺料、空挂、空手纯风味都
+立即回应,不耗时);工作中(workOf 有记录)再次触发 → "还在忙碌中"warn。
+详见 04 §2.2 与 10 I-16。
 
 `auto-trigger` 还有第二条(时钟)路径:`onClock → tickAutoTriggers()` 每拍检查一次,
 **已就位**(直接挂在 `poweredBy` 指定的类型下,如水车挂在河流下)的节点每 `intervalMs`

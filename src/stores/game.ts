@@ -24,6 +24,15 @@ function stackLimit(type: string): number {
   return typeof ms === "number" && ms > 0 ? ms : Infinity
 }
 
+/**
+ * 该类型在世界里的处理上限:最多同时挂几个【直接】子节点(缺省不限)。
+ * 与堆叠上限相对——世界挂载是流程(斧子只面对它的树),不数子子节点。
+ */
+function processLimit(type: string): number {
+  const mp = getDef(type).maxProcess
+  return typeof mp === "number" && mp > 0 ? mp : Infinity
+}
+
 /** 在 roots 里找 nodeId 所属的顶层节点(堆根) */
 /**
  * 沿同类祖先上行,找到节点所属"堆"的根。
@@ -50,11 +59,13 @@ function canAbsorb(pile: GameNode, whole: GameNode): boolean {
 import type { AutoTriggerBehavior, GameNode, LogEntry, LogKind } from "../game/types"
 import { nodeCount } from "../game/types"
 import { countNodes, findNode, isAncestorOf, removeNode } from "../game/tree"
-import { clearAllTriggerFx, emitTriggerFx, type TriggerOutcome } from "../game/fx"
+import { allWork, clearAllWork, clearWork, startWork, workOf, type WorkKind } from "../game/work"
 
 const LOG_LIMIT = 200
+/** 普通工作的默认时长:未声明 workMs 的节点做一次事要花的时间 */
+const DEFAULT_WORK_MS = 1500
 /** 存档结构版本:不匹配时自动开新档 */
-export const SAVE_VERSION = 5
+export const SAVE_VERSION = 6
 /** 存档在 localStorage 里的 key(与 persist 配置共用) */
 export const SAVE_KEY = "game"
 
@@ -82,11 +93,6 @@ interface GameState {
   backpack: GameNode[]
   /** 手工合成当前选择的配方 */
   selectedRecipeId: string
-  /** 探索进行中状态 */
-  exploring: boolean
-  /** 发起探索的节点 id(多探索节点时结算到正确的节点下) */
-  exploringNodeId: string | null
-  exploreEndAt: number
   /** 本次世界开始时间(游玩时长 = now - startedAt) */
   startedAt: number
   /** 已发现过的地形类型 id(图鉴用) */
@@ -111,9 +117,6 @@ function freshState(): GameState {
     ],
     backpack: [{ id: "n3", type: "bench", children: [], collapsed: true }],
     selectedRecipeId: RECIPES[0]?.id ?? "",
-    exploring: false,
-    exploringNodeId: null,
-    exploreEndAt: 0,
     startedAt: Date.now(),
     discovered: [],
     log: [],
@@ -131,15 +134,10 @@ export function isSaveValid(saved: unknown): boolean {
   if (s.version !== SAVE_VERSION) return false
   if (typeof s.uid !== "number" || s.uid < 2) return false
   if (typeof s.selectedRecipeId !== "string") return false
-  if (typeof s.exploring !== "boolean") return false
-  if (typeof s.exploreEndAt !== "number") return false
   if (typeof s.startedAt !== "number") return false
   if (!Array.isArray(s.discovered) || !s.discovered.every((t) => typeof t === "string")) return false
   if (typeof s.logSeq !== "number") return false
   if (!(s.selectedId === null || typeof s.selectedId === "string")) return false
-  if (!(s.exploringNodeId === null || s.exploringNodeId === undefined || typeof s.exploringNodeId === "string")) {
-    return false
-  }
   if (
     !Array.isArray(s.log) ||
     !s.log.every(
@@ -258,6 +256,48 @@ function recipeStateOf(selectedId: string, piles: Record<string, number>) {
   return { recipe, inputs, craftable: inputs.every((i) => i.ok) }
 }
 
+/** 统计子树材料 type→件数(每个同类节点计 1,与 takeNodes 消耗同口径) */
+function countPiles(children: GameNode[]): Record<string, number> {
+  const piles: Record<string, number> = {}
+  const walk = (ns: GameNode[]) => {
+    for (const n of ns) {
+      piles[n.type] = (piles[n.type] ?? 0) + 1
+      walk(n.children)
+    }
+  }
+  walk(children)
+  return piles
+}
+
+/** 配方缺料描述列表(空 = 料齐);recipeState 无效时 null */
+function missingOf(state: ReturnType<typeof recipeStateOf>): string[] | null {
+  if (!state) return null
+  return state.inputs
+    .filter((i) => !i.ok)
+    .map((i) => `${getDef(i.stack.type).name}(缺 ${i.stack.count - i.have})`)
+}
+
+function craftMissingMsg(missing: string[]): string {
+  return `材料不足:${missing.join("、")}。把材料节点挂到「手工合成」下面再试。`
+}
+
+/**
+ * 节点是否被占用:沿祖先上行,某个祖先有正在进行的工作(interact/craft——
+ * 它的子节点是流程参与物,如石斧正在砍的森林;探索工作不占用子级)。
+ * 返回占用它的祖先,无则 null。触发前置检查与行占用样式(NodeItem)
+ * 共用这一处口径。
+ */
+export function occupierOfWorkingAncestor(roots: GameNode[], node: GameNode): GameNode | null {
+  let current = node
+  for (;;) {
+    const parent = findNode(roots, current.id)?.parent
+    if (!parent) return null
+    const job = workOf(parent.id)
+    if (job && (job.kind === "interact" || job.kind === "craft")) return parent
+    current = parent
+  }
+}
+
 export const useGameStore = defineStore("game", {
   state: (): GameState => freshState(),
 
@@ -299,25 +339,11 @@ export const useGameStore = defineStore("game", {
     /** 合成台下方挂载的材料量(按类型精确计数,每个同类节点计 1) */
     benchPiles(): Record<string, number> {
       const bench = this.benchNode
-      if (!bench) return {}
-      const map: Record<string, number> = {}
-      const walk = (ns: GameNode[]) => {
-        for (const n of ns) {
-          map[n.type] = (map[n.type] ?? 0) + 1
-          walk(n.children)
-        }
-      }
-      walk(bench.children)
-      return map
+      return bench ? countPiles(bench.children) : {}
     },
     /** 当前配方 × 合成台材料状态 */
     recipeState(): ReturnType<typeof recipeStateOf> {
       return recipeStateOf(this.selectedRecipeId, this.benchPiles)
-    },
-    /** 探索冷却剩余秒数 */
-    exploreCdLeft(): number {
-      if (!this.exploring) return 0
-      return Math.max(0, Math.ceil((this.exploreEndAt - gameNow.value) / 1000))
     },
     /** 游玩秒数(由时钟推算,不落盘) */
     playSeconds(): number {
@@ -330,7 +356,7 @@ export const useGameStore = defineStore("game", {
     // ── 基础 ─────────────────────────────────────────────
     reset() {
       this.$patch(freshState())
-      clearAllTriggerFx() // 旧 id 的行已卸载,特效事件无人消费,全清
+      clearAllWork() // 旧节点的工作随旧世界作废
       this.pushLog("一个崭新的世界展开了。", "info")
       this.pushLog("点击「探索」节点寻找地形;点击「背包」节点开合背包分屏。", "info")
     },
@@ -338,10 +364,14 @@ export const useGameStore = defineStore("game", {
     /**
      * 游戏循环心跳:由 App 每秒驱动。只做"到点结算",
      * 时钟本身在 store 之外的 gameNow 里,避免每秒触发一次存档写盘。
+     * 工作结算以 endAt 时间戳对账:setTimeout 负责前台的准点结算,
+     * 这里兜后台节流造成的迟到(只补一次,不做离线补算)。
      */
     onClock() {
-      if (this.exploring && gameNow.value >= this.exploreEndAt) {
-        this.resolveExplore()
+      if (!this.dragging) {
+        for (const [id, job] of allWork()) {
+          if (gameNow.value >= job.endAt) this.resolveWork(id)
+        }
       }
       this.tickAutoTriggers()
     },
@@ -381,55 +411,124 @@ export const useGameStore = defineStore("game", {
     },
 
     /**
-     * 触发一个节点:语义与"点击它"完全一致(自触发行为也走这里,
-     * 所以"被驱动"与"被点击"是同一条结算路径)。
-     * 行为节点按行为分发、不向子节点传导;普通节点有子则逐子触发(自身为来源),
-     * 叶子则空手触发。
-     * silent:自动驱动(水车等)用——只记产出,不刷风味/一无所获日志。
-     * 每条结算路径都会 emitTriggerFx 广播视觉反馈(成功变色/无效变灰),
-     * 静默驱动只压日志不压视觉。
+     * 触发一个节点 = 让它开始做事:语义与"点击它"完全一致(自触发行为也走
+     * 这里,"被驱动"与"被点击"是同一条路径)。
+     * 做事需要时间(work):挂一条工作记录,行底进度条随之填充,到点由
+     * resolveWork 结算(交互掷骰/合成/探索产出)。工作中的节点忙碌,
+     * 再次触发无效(现实里不可能一瞬间砍一棵树)。
+     * 视图开关(如「背包」节点)即时生效,不走工作;自触发节点(水车)被
+     * 触发 = 立即驱动子节点,忙碌的是子节点们。
+     * silent:自动驱动(水车等)用——结算时只记产出,不刷风味/一无所获日志。
      */
     triggerNode(node: GameNode, silent = false) {
-      const behavior = getDef(node.type).behavior
+      const def = getDef(node.type)
+      const behavior = def.behavior
 
-      // 视图开关行为(如「背包」节点)由界面层处理,这里只选中
+      // 视图开关行为(如「背包」节点)由界面层处理,即时生效,不受忙碌/占用影响
       if (behavior?.kind === "view-toggle") return
 
-      // 功能节点:按声明式行为分发,不向子节点传导
-      if (behavior?.kind === "explore") {
-        this.startExplore(node)
+      // 前置检查(任何分发/挂工作之前):忙碌与被占用对一切触发一视同仁——
+      // 注定没有效果的触发立即拒绝/回应,不白等工作时长
+      if (workOf(node.id)) {
+        if (!silent) this.pushLog(`「${def.name}」还在忙碌中……`, "warn")
         return
       }
-      if (behavior?.kind === "craft") {
-        this.craftBench(node)
+      // 占用:祖上有正在进行的工作(interact/craft),本节点是流程参与物
+      // (如石斧正在砍的那棵森林)——被占用期间不可自行触发
+      const occupier = occupierOfWorkingAncestor(
+        findNode(this.nodes, node.id) ? this.nodes : this.backpack,
+        node,
+      )
+      if (occupier) {
+        if (!silent) {
+          this.pushLog(`「${def.name}」正被「${getDef(occupier.type).name}」占用着。`, "warn")
+        }
         return
       }
+
       if (behavior?.kind === "auto-trigger") {
         this.driveAutoTrigger(node, silent)
         return
       }
-      if (behavior) return // 其余行为(如工厂)暂无点击语义,静默
-
-      if (node.children.length > 0) {
-        // 触发父节点:点击落地即反馈,再以它为「来源」依次触发每个子节点——
-        // 子节点按交互结果各自反馈,视觉上就是沿树传播的瀑布流
-        emitTriggerFx(node.id, "ok")
-        for (const child of node.children) {
-          emitTriggerFx(child.id, this.trigger(node.type, child.type, silent))
-        }
-        return
+      if (behavior && behavior.kind !== "explore" && behavior.kind !== "craft") {
+        return // 其余行为(如工厂)暂无点击语义,静默
       }
-      // 触发叶子节点:空手,反馈取决于交互结果
-      emitTriggerFx(node.id, this.trigger("hand", node.type, silent))
+
+      const kind: WorkKind =
+        behavior?.kind === "explore" ? "explore" : behavior?.kind === "craft" ? "craft" : "interact"
+      if (kind === "craft") {
+        // 预检材料:不足立即拒绝(结算时还会复核,防止工作期间材料被抽走)
+        const missing = missingOf(recipeStateOf(this.selectedRecipeId, countPiles(node.children)))
+        if (missing === null) return // 没有有效配方(防御路径,不应发生)
+        if (missing.length > 0) {
+          if (!silent) this.pushLog(craftMissingMsg(missing), "warn")
+          return
+        }
+      } else if (kind === "interact") {
+        if (node.children.length > 0) {
+          // 流程节点:子节点里没有任何可交互条目 → 立即告知,不空转
+          if (!node.children.some((c) => findInteraction(node.type, c.type))) {
+            if (!silent) {
+              this.pushLog(`「${def.name}」对下面的节点似乎都产生不了什么效果。`, "warn")
+            }
+            return
+          }
+        } else {
+          const it = findInteraction("hand", node.type)
+          if (!it || it.results.length === 0) {
+            // 空手摸一把没有产出可言(纯提示/风味):立即回应,不耗时
+            this.trigger("hand", node.type, silent)
+            return
+          }
+        }
+      }
+
+      const duration =
+        kind === "explore"
+          ? (exploreBehaviorOf(node)?.durationMs ?? getDef(node.type).workMs ?? DEFAULT_WORK_MS)
+          : (getDef(node.type).workMs ?? DEFAULT_WORK_MS)
+      const job = startWork(node.id, kind, duration, silent)
+      if (kind === "craft") job.recipeId = this.selectedRecipeId // 快照:结算按开工时的配方
+      if (kind === "explore" && !silent) this.pushLog("你向着未知出发……", "info")
+      // 前台准点结算;后台节流的迟到由 onClock 按 endAt 时间戳对账。
+      // 定时器记进工作:reset/导入存档全清时一并撤销,防旧定时器撞新世界同号节点
+      job.timer = setTimeout(() => this.resolveWork(node.id), duration)
+    },
+
+    /**
+     * 工作到点结算:按工作种类分发到对应的即时结算逻辑。
+     * 节点在开始工作后被移走/删除 → 工作作废(静默丢弃);
+     * 拖拽进行中不结算(与 Sortable 的落盘序列抢写),onClock 稍后再来。
+     */
+    resolveWork(nodeId: string) {
+      const job = workOf(nodeId)
+      if (!job) return
+      if (this.dragging) return
+      clearWork(nodeId)
+      const hit = findNode(this.nodes, nodeId) ?? findNode(this.backpack, nodeId)
+      if (!hit) return
+      const node = hit.node
+      if (job.kind === "explore") {
+        this.finishExplore(node, job.silent)
+      } else if (job.kind === "craft") {
+        this.craftBench(node, job.recipeId, job.silent)
+      } else {
+        if (node.children.length > 0) {
+          for (const child of node.children) {
+            this.trigger(node.type, child.type, job.silent)
+          }
+        } else {
+          this.trigger("hand", node.type, job.silent)
+        }
+      }
     },
 
     /**
      * 驱动一个自触发节点:依次"触发"它的每个子节点
-     * (子节点按被点击的语义结算,如水车 → 石斧 → 森林)。
+     * (子节点按被点击的语义开始各自的工作,如水车 → 石斧 → 森林)。
      * 既用于到点自动驱动(silent),也用于玩家手动点击。
      */
     driveAutoTrigger(node: GameNode, silent = false) {
-      emitTriggerFx(node.id, "ok") // 被驱动本身即成功:转一圈的心跳脉冲
       for (const child of node.children) {
         this.triggerNode(child, silent)
       }
@@ -482,11 +581,10 @@ export const useGameStore = defineStore("game", {
 
     /**
      * 解析并结算一次「来源 → 目标」交互(silent = 自动驱动的背景触发,不刷风味日志)。
-     * 返回触发结果供调用方广播视觉反馈:
-     * 查不到条目 = fail(无效);有条目 = ok——风味回应、实际产出、
-     * 或掷骰未中(交互本身有效,只是这次运气不好)都算成功。
+     * 由 resolveWork 在工作到点时调用;无条目 → "没有效果"warn;
+     * results 空 → 纯风味 note;掷骰全空 → "一无所获";命中 → 逐 drop addItem。
      */
-    trigger(source: string, target: string, silent = false): TriggerOutcome {
+    trigger(source: string, target: string, silent = false) {
       const interaction = findInteraction(source, target)
       if (!interaction) {
         if (!silent) {
@@ -495,22 +593,21 @@ export const useGameStore = defineStore("game", {
             "warn",
           )
         }
-        return "fail"
+        return
       }
       if (interaction.results.length === 0) {
         if (!silent) this.pushLog(interaction.note, "info")
-        return "ok"
+        return
       }
       const drops = rollDrops(interaction)
       if (drops.length === 0) {
         if (!silent) this.pushLog(`${interaction.note} 一无所获。`, "warn")
-        return "ok"
+        return
       }
       for (const drop of drops) {
         this.addItem(drop.type, drop.count)
       }
       if (!silent) this.pushLog(interaction.note, "info")
-      return "ok"
     },
 
     toggleCollapse(id: string) {
@@ -548,8 +645,9 @@ export const useGameStore = defineStore("game", {
     },
 
     /**
-     * 把节点整棵收进背包(挂到最近一堆同类下,没有则成为新的一堆)。
-     * 子树分拣:同类子节点随行;背包不兼容的回世界;异类子节点释放到背包根。
+     * 把节点收进背包(挂到最近一堆同类下,没有则成为新的一堆)。
+     * 与跨区拖拽同一条规矩:一次一个——节点下面还挂着子节点时拒绝,
+     * 玩家先把子节点一条一条移走(物理直觉:挖方块也是一个一个挖)。
      */
     nodeToItem(id: string) {
       const hit = findNode(this.nodes, id) ?? findNode(this.backpack, id)
@@ -559,25 +657,17 @@ export const useGameStore = defineStore("game", {
         this.pushLog(`「${def.name}」没法收进背包。`, "warn")
         return
       }
+      if (hit.node.children.length > 0) {
+        this.pushLog(
+          `「${def.name}」下面还挂着 ${hit.node.children.length} 个节点——先把它们移走,一条一条回收。`,
+          "warn",
+        )
+        return
+      }
       const inWorld = findNode(this.nodes, id)
       const removed = removeNode(inWorld ? this.nodes : this.backpack, id)
       if (!removed) return
       if (this.selectedId === id) this.selectedId = null
-      const keep: GameNode[] = []
-      let released = 0
-      for (const kid of removed.children) {
-        if (!canPlaceInZone(kid.type, "backpack")) {
-          this.nodes.push(kid)
-          released++
-        } else if (kid.type === removed.type) {
-          keep.push(kid)
-        } else {
-          this.backpack.push(kid)
-          released++
-        }
-      }
-      removed.children = keep
-      if (released > 0) this.pushLog(`${released} 个子节点被释放。`, "warn")
       this.stackIntoBackpack(removed)
       this.pushLog(`「${def.name}」已收进背包。`, "info")
     },
@@ -661,34 +751,12 @@ export const useGameStore = defineStore("game", {
     },
 
     // ── 探索(节点) ───────────────────────────────────────
-    startExplore(node: GameNode) {
-      if (this.exploring) {
-        this.pushLog(`还在探索中……(约 ${this.exploreCdLeft} 秒)`, "warn")
-        emitTriggerFx(node.id, "fail")
-        return
-      }
-      const b = exploreBehaviorOf(node)
-      this.exploring = true
-      this.exploringNodeId = node.id
-      this.exploreEndAt = Date.now() + (b?.durationMs ?? 5000)
-      this.pushLog("你向着未知出发……", "info")
-      emitTriggerFx(node.id, "ok")
-    },
-
-    /** 到点结算:有概率在发起探索的节点下生成地形 */
-    resolveExplore() {
-      this.exploring = false
-      const explorer =
-        (this.exploringNodeId &&
-          (findNode(this.nodes, this.exploringNodeId)?.node ??
-            findNode(this.backpack, this.exploringNodeId)?.node)) ||
-        this.explorerNode
-      this.exploringNodeId = null
-      if (!explorer) return
+    /** 探索工作到点结算:有概率在该节点下生成地形(按发起节点结算,I-7)。
+     *  silent(被自动驱动):不打结算日志,地形静默出现(可见于树)。 */
+    finishExplore(explorer: GameNode, silent = false) {
       const b = exploreBehaviorOf(explorer)
       if (Math.random() >= (b?.successRate ?? 0.5)) {
-        this.pushLog("这次探索一无所获。", "warn")
-        emitTriggerFx(explorer.id, "fail")
+        if (!silent) this.pushLog("这次探索一无所获。", "warn")
         return
       }
       const terrain = rollPool(b?.pool ?? [{ type: "forest", weight: 1 }])
@@ -696,8 +764,7 @@ export const useGameStore = defineStore("game", {
       explorer.children.push(this.makeNode(terrain))
       explorer.collapsed = false // 有新发现,展开让玩家看见
       if (!this.discovered.includes(terrain)) this.discovered.push(terrain)
-      this.pushLog(`探索成功!「${def.name}」出现在了探索节点之下。`, "gain")
-      emitTriggerFx(explorer.id, "ok")
+      if (!silent) this.pushLog(`探索成功!「${def.name}」出现在了探索节点之下。`, "gain")
     },
 
     // ── 手工合成(节点) ───────────────────────────────────
@@ -708,30 +775,21 @@ export const useGameStore = defineStore("game", {
       }
     },
 
-    /** 点击手工合成节点:检测该节点下挂载的材料并按当前配方合成 */
-    craftBench(bench?: GameNode) {
+    /**
+     * 点击手工合成节点:检测该节点下挂载的材料并按当前配方合成。
+     * 材料不足在 triggerNode 挂工作时已预检过一次;这里是到点结算时的复核
+     * (工作期间材料可能被抽走)。recipeId 用工作快照(开工时的配方),
+     * 缺省当前配方;silent(被自动驱动)不打结算日志。
+     */
+    craftBench(bench?: GameNode, recipeId?: string, silent = false) {
       const target = bench ?? this.benchNode
       if (!target) return
-      const piles: Record<string, number> = {}
-      const walk = (ns: GameNode[]) => {
-        for (const n of ns) {
-          piles[n.type] = (piles[n.type] ?? 0) + 1
-          walk(n.children)
-        }
-      }
-      walk(target.children)
-      const state = recipeStateOf(this.selectedRecipeId, piles)
+      const state = recipeStateOf(recipeId ?? this.selectedRecipeId, countPiles(target.children))
       if (!state) return
       const recipe = state.recipe
-      const missing = state.inputs
-        .filter((i) => !i.ok)
-        .map((i) => `${getDef(i.stack.type).name}(缺 ${i.stack.count - i.have})`)
-      if (missing.length > 0) {
-        this.pushLog(
-          `材料不足:${missing.join("、")}。把材料节点挂到「手工合成」下面再试。`,
-          "warn",
-        )
-        emitTriggerFx(target.id, "fail")
+      const missing = missingOf(state)
+      if (missing && missing.length > 0) {
+        if (!silent) this.pushLog(craftMissingMsg(missing), "warn")
         return
       }
       let unsatisfied = 0
@@ -740,105 +798,67 @@ export const useGameStore = defineStore("game", {
       }
       if (unsatisfied > 0) {
         // 计数与移除口径不一致的防御:不应发生
-        this.pushLog("合成材料出现异常,已中止。", "warn")
-        emitTriggerFx(target.id, "fail")
+        if (!silent) this.pushLog("合成材料出现异常,已中止。", "warn")
         return
       }
       this.addItem(recipe.output.type, recipe.output.count, true)
-      this.pushLog(
-        `合成成功:${recipe.inputs
-          .map((i) => `${getDef(i.type).name}×${i.count}`)
-          .join(" + ")} → ${getDef(recipe.output.type).name}×${recipe.output.count}`,
-        "craft",
-      )
-      emitTriggerFx(target.id, "ok")
+      if (!silent) {
+        this.pushLog(
+          `合成成功:${recipe.inputs
+            .map((i) => `${getDef(i.type).name}×${i.count}`)
+            .join(" + ")} → ${getDef(recipe.output.type).name}×${recipe.output.count}`,
+          "craft",
+        )
+      }
     },
 
     // ── 拖拽辅助 ─────────────────────────────────────────
     /**
      * 拖拽守卫:节点是否可以放入 board 上 owner 的子列表。
-     * - 区域权限(zones);
-     * - 从背包拖"整堆"(带子节点的父节点)进世界 → 拒绝,防止一次性放置大量物品;
-     *   拖单个子节点进世界 → 允许;背包内部(如挂到手工合成下)不受此限;
-     * - 背包里的普通物品:子级只能挂同类(堆叠规则)且堆未满;功能节点不受限;
-     * - 防环(不可拖进自己的子树)。
+     * - ① 区域权限(zones);
+     * - ② 跨区整树禁止,双向都"一次一个":背包→世界的整堆(带子节点)
+     *   拒绝(放置走 placeItem,一次只放一个);世界→背包的整树拒绝
+     *   (回收一条一条来,像我的世界挖方块)。带没带子树按【数据】判定
+     *   (dragNode.children),不看 DOM——折叠节点的子列表不渲染,DOM 会漏判;
+     * - ③④ 无 owner(面板根)或 owner 已不在树上 → 放行(根列表无上限);
+     * - ⑤ 世界处理上限:owner 的直接子节点数 +1 超过 maxProcess → 拒绝
+     *   (流程节点同时处理几件事,如石斧同时只砍一棵树;缺省不限);
+     * - ⑥ 背包里的普通物品:子级只能挂同类(堆叠规则)且按堆根判定堆未满;
+     *   功能节点不受限;
+     * - ⑦ 防环(不可拖进自己的子树)。
      */
     canDropIntoChildList(dragEl: HTMLElement, board: BoardId, ownerId: string | undefined): boolean {
       const type = dragEl.dataset.ntype
       if (type && !canPlaceInZone(type, board)) return false
-      if (board === "world" && dragEl.dataset.zone === "backpack") {
-        // 整堆父节点(带有子节点)不允许拖进世界
-        if (dragEl.querySelector(":scope > ol.child-list .node-wrap")) return false
-      }
       const dragId = dragEl.dataset.nodeId
+      const dragNode =
+        dragId && dragId !== ownerId
+          ? (findNode(this.nodes, dragId)?.node ?? findNode(this.backpack, dragId)?.node ?? null)
+          : null
+      const carriesTree = !!dragNode && dragNode.children.length > 0
+      if (carriesTree) {
+        if (board === "world" && dragEl.dataset.zone === "backpack") return false
+        if (board === "backpack" && dragEl.dataset.zone === "tree") return false
+      }
       if (!dragId || !ownerId) return true
       const owner = findNode(this.boardRoots(board), ownerId)?.node
       if (!owner) return true
-      const ownerDef = getDef(owner.type)
-      if (board === "backpack" && !ownerDef.behavior) {
+      if (board === "world") {
+        if (owner.children.length + 1 > processLimit(owner.type)) return false
+      } else if (!getDef(owner.type).behavior) {
         // 普通物品:子级只能挂同类,且并入后不超过堆上限。
-        // 容量以「同类链堆根」的子树总量判定 —— 挂到堆内部的任何层级
+        // 容量以「同类链堆根」的子树总量判定 —— 挂到堆内部任何层级
         // (包括叶子节点、挂在功能节点下的堆)都视为并入整堆,无法绕过 maxStack;
         // 同一堆内部的整理不改变总量,放行。
         if (type && type !== owner.type) return false
-        const fromWorld = !!findNode(this.nodes, dragId)
-        const dragNode =
-          findNode(this.nodes, dragId)?.node ?? findNode(this.backpack, dragId)?.node ?? null
         if (dragNode) {
+          const fromWorld = !!findNode(this.nodes, dragId)
           const pileRoot = stackRootOf(this.backpack, owner)
           const dragRoot = stackRootOf(fromWorld ? this.nodes : this.backpack, dragNode)
           if (dragRoot.id !== pileRoot.id && !canAbsorb(pileRoot, dragNode)) return false
         }
       }
       return !isAncestorOf(this.boardRoots(board), dragId, ownerId)
-    },
-
-    /**
-     * 节点落进背包后的整理:
-     * - 与背包不兼容的子树释放回世界;
-     * - 普通物品下只保留同类子节点(堆叠规则),异类子节点释放到背包根;
-     *   功能节点(合成台等)的子级不受同类规则限制。
-     * 堆与堆之间不做自动合并 —— 想合并就把一堆拖到另一堆下面。
-     */
-    settleBackpackDrop(dropped: GameNode) {
-      let toWorld = 0
-      let toRoot = 0
-      const def = getDef(dropped.type)
-      const fix = (ns: GameNode[], parentType: string, parentFunctional: boolean): GameNode[] => {
-        const keep: GameNode[] = []
-        for (const n of ns) {
-          if (!canPlaceInZone(n.type, "backpack")) {
-            this.nodes.push(n)
-            toWorld++
-            continue
-          }
-          const functional = !!getDef(n.type).behavior
-          if (!parentFunctional && n.type !== parentType) {
-            this.backpack.push(n)
-            toRoot++
-            continue
-          }
-          n.children = fix(n.children, n.type, functional)
-          keep.push(n)
-        }
-        return keep
-      }
-      dropped.children = fix(dropped.children, dropped.type, !!def.behavior)
-      if (toWorld + toRoot > 0) {
-        this.pushLog(`${toWorld + toRoot} 个子节点被释放${toWorld ? "(部分回世界)" : ""}。`, "warn")
-      }
-    },
-
-    /**
-     * 物品堆被拖进"世界"后的结算:放置语义 = 一次只放一个,
-     * 余下的子节点回背包重新堆叠。
-     */
-    settleWorldDrop(dropped: GameNode) {
-      if (dropped.children.length === 0) return
-      const rest = dropped.children
-      dropped.children = []
-      dropped.collapsed = true
-      for (const child of rest) this.stackIntoBackpack(child)
     },
 
     // ── 存档导入/导出 ────────────────────────────────────
@@ -849,9 +869,6 @@ export const useGameStore = defineStore("game", {
         nodes: this.nodes,
         backpack: this.backpack,
         selectedRecipeId: this.selectedRecipeId,
-        exploring: this.exploring,
-        exploringNodeId: this.exploringNodeId,
-        exploreEndAt: this.exploreEndAt,
         startedAt: this.startedAt,
         discovered: this.discovered,
         log: this.log,
@@ -871,14 +888,11 @@ export const useGameStore = defineStore("game", {
       }
       if (!isSaveValid(data)) return false
       const s = data as Record<string, unknown>
-      clearAllTriggerFx()
+      clearAllWork() // 换世界,旧节点的工作作废
       this.$patch({
         nodes: s.nodes as GameNode[],
         backpack: s.backpack as GameNode[],
         selectedRecipeId: s.selectedRecipeId as string,
-        exploring: s.exploring as boolean,
-        exploringNodeId: (s.exploringNodeId ?? null) as string | null,
-        exploreEndAt: s.exploreEndAt as number,
         startedAt: s.startedAt as number,
         discovered: s.discovered as string[],
         log: s.log as LogEntry[],
@@ -898,9 +912,6 @@ export const useGameStore = defineStore("game", {
       "nodes",
       "backpack",
       "selectedRecipeId",
-      "exploring",
-      "exploringNodeId",
-      "exploreEndAt",
       "startedAt",
       "discovered",
       "log",

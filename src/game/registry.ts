@@ -50,6 +50,7 @@ export const NODE_DEFS: NodeDef[] = shallowReactive([
     permanent: true,
     zones: ["backpack"],
     accent: "#8672bd",
+    workMs: 2000,
     desc: "把材料节点挂到它下面,点击它就会按当前配方合成,产物自动进背包。它天然生成在背包里,方便整堆挂料、批量合成。",
     behavior: { kind: "craft" },
   },
@@ -59,8 +60,9 @@ export const NODE_DEFS: NodeDef[] = shallowReactive([
     category: "functional",
     icon: "waterwheel",
     maxStack: 1,
+    maxProcess: 2,
     accent: "#9c7b4a",
-    desc: "把它放到河流下面,水流会每 3 秒推动它一次,驱动挂在它下面的节点——比如石斧。石斧下面再挂上森林,木头就会源源不断地流进背包。",
+    desc: "把它放到河流下面,水流会每 3 秒推动它一次,驱动挂在它下面的节点——比如石斧(最多同时驱动两个)。石斧下面再挂上森林,木头就会源源不断地流进背包。",
     behavior: { kind: "auto-trigger", intervalMs: 3000, poweredBy: "river" },
   },
   {
@@ -70,6 +72,7 @@ export const NODE_DEFS: NodeDef[] = shallowReactive([
     icon: "forest",
     worldOnly: true,
     accent: "#3d8b57",
+    workMs: 3000,
     desc: "一片郁郁葱葱的森林。空手翻找可以捡到木棍和石子;把石斧挂在它上面就能砍到木头。",
   },
   {
@@ -79,7 +82,9 @@ export const NODE_DEFS: NodeDef[] = shallowReactive([
     icon: "river",
     worldOnly: true,
     accent: "#2f8f96",
-    desc: "一条潺潺流淌的河。河滩上散落着被水冲刷圆润的石子。",
+    workMs: 2500,
+    maxProcess: 2,
+    desc: "一条潺潺流淌的河。河滩上散落着被水冲刷圆润的石子;河上最多同时架起两台水车。",
   },
   {
     id: "stick",
@@ -111,8 +116,10 @@ export const NODE_DEFS: NodeDef[] = shallowReactive([
     category: "tool",
     icon: "stoneAxe",
     maxStack: 1,
+    maxProcess: 1,
     accent: "#8672bd",
-    desc: "石头绑上木棍制成的斧头。把它拖到世界,再把森林挂在它下面,点击它就会砍伐森林。",
+    workMs: 2000,
+    desc: "石头绑上木棍制成的斧头。把它拖到世界,再把森林挂在它下面,点击它就会砍伐森林——它一次只对一棵树下手,想同时砍两棵就再造一把。",
   },
 ])
 

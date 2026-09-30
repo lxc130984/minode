@@ -3,17 +3,14 @@
 > 存档 = game store 的 pick 白名单字段子集,JSON 序列化进 localStorage。
 > 版本迁移策略:**结构不兼容 → 直接重置**(开发期项目,不做数据迁移)。
 
-## 1. 存档结构(SAVE_VERSION = 5)
+## 1. 存档结构(SAVE_VERSION = 6)
 
 ```jsonc
 {
-  "version": 5,
+  "version": 6,
   "nodes":    [ /* 世界树根 */ ],
   "backpack": [ /* 背包树根 */ ],
   "selectedRecipeId": "stone-axe",
-  "exploring": false,
-  "exploringNodeId": null,
-  "exploreEndAt": 0,
   "startedAt": 1760000000000,
   "discovered": ["forest"],
   "log": [ { "seq": 1, "time": 0, "text": "…", "kind": "info" } ],
@@ -24,9 +21,11 @@
 ```
 
 - key = `"game"`(SAVE_KEY);由 pinia-plugin-persistedstate 自动写入
-  (每次 store mutation 全量序列化——所以游戏时钟在 store 外,见 04 §1.4)。
-- `dragging` **不持久化**。
-- 节点内不再有 `count` 字段(v4 及以前有,数量语义已改为子树大小)。
+  (每次 store mutation 全量序列化——所以游戏时钟/工作表在 store 外,见 04 §1.4/§1.5)。
+- `dragging` **不持久化**;进行中的**工作也不持久化**(刷新作废重头,
+  与自触发计时同一取向——不把挂机折算成产出)。
+- 节点内不再有 `count` 字段(v4 及以前有,数量语义已改为子树大小);
+  v6 起不再有 exploring/exploringNodeId/exploreEndAt(探索收编进工作系统)。
 
 **字段三处同步**:persist.pick、`exportSaveData()`、`applySaveData()` 的 $patch
 ——加状态字段时三处都要改,漏一处 = 导出丢数据/导入丢字段。
@@ -38,9 +37,9 @@
 1. 是对象;
 2. `version === SAVE_VERSION`;(**任何存档结构变更都必须 bump SAVE_VERSION**)
 3. `typeof uid === "number" && uid >= 2`;
-4. `selectedRecipeId` string;`exploring` boolean;`exploreEndAt`/`startedAt` number;
+4. `selectedRecipeId` string;`startedAt` number;
 5. `discovered` 是 string[];`logSeq` number;
-   `selectedId` null|string;`exploringNodeId` null|undefined|string;
+   `selectedId` null|string;
 6. `log` 是数组且每条 `{seq:number, time:number, text:string}`;
 7. `nodes`/`backpack` 是数组,递归 nodeOk:
    - `id` string 且**全局唯一**(Set 去重,两棵树共用一个 Set);
@@ -81,7 +80,7 @@ main.ts:
 
 ## 5. 版本迁移策略
 
-`SAVE_VERSION` 历史:1→2(引入特殊节点)→3(默认折叠)→4(区域权限)→**5(去 count,背包树)**。
+`SAVE_VERSION` 历史:1→2(引入特殊节点)→3(默认折叠)→4(区域权限)→5(去 count,背包树)→**6(探索冷却收编进工作系统,删 exploring 三字段)**。
 
 规则:**改任何已持久化字段的形状/语义 → bump SAVE_VERSION**。
 旧档在 ensureSaveIntegrity 处被直接清除,玩家从 freshState 重新开始
@@ -90,7 +89,8 @@ main.ts:
 
 ## 6. 已知行为
 
-- 探索进行中(exploring=true)导入/刷新:时间戳驱动,回前台或下一拍心跳即结算,不丢。
+- 工作进行中刷新/导入:进行中的工作作废(工作表不落盘),不结算、不补偿——
+  与自触发计时同一取向(不把挂机/离线折算成产出)。
 - 超过 maxStack 的历史遗留堆(容量守卫加严之前产生)**不会被自动拆分**——
   守卫只拦新增;玩家可手动拖出(拖出方向不受容量限制)。
 - localStorage 按 origin 隔离;线上(https://lxc130984.github.io)与本地 dev 的档互不相干。

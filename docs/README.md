@@ -9,7 +9,7 @@
 | [02-data-model.md](02-data-model.md) | GameNode / NodeDef / 行为联合 / 交互与配方结构、数量语义 | 改任何数据结构前 |
 | [03-registry.md](03-registry.md) | 内容注册表全解:每个导出、每个内置定义逐字段说明 | 加内容前 |
 | [04-store.md](04-store.md) | 主 store 逐个详解:state 字段、getter、全部 action 的签名/语义/边界,ui store,游戏时钟 | 改游戏逻辑前 |
-| [05-dnd.md](05-dnd.md) | 拖拽系统:group 工厂、四条守卫规则、settle 生命周期、SortableJS 硬知识 | 改拖拽/堆叠前 |
+| [05-dnd.md](05-dnd.md) | 拖拽系统:group 工厂、七条守卫规则(区域/跨区整树/处理上限/堆叠/防环)、SortableJS 硬知识 | 改拖拽/堆叠前 |
 | [06-components.md](06-components.md) | 界面层:App 布局、9 个组件逐一(Props/computed/模板/样式)、主题 CSS | 改界面前 |
 | [07-save.md](07-save.md) | 存档系统:结构、校验规则全列表、导入导出、版本迁移策略 | 改存档结构前 |
 | [08-extension.md](08-extension.md) | 扩展指南:加物品/节点/交互/配方/功能节点,运行时 API 全解 | 加新内容时 |

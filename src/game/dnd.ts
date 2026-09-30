@@ -1,16 +1,17 @@
 /**
- * 拖拽系统:SortableJS 分组守卫 + 落库整理。
+ * 拖拽系统:SortableJS 分组守卫 + 落库钩子。
  *
  * 世界树 / 背包树都是 GameNode 列表,跨区拖拽就是移动节点本身。
  * 规则:
  *   - 守卫:节点能否进入某面板由 registry 的 zones 权限决定;
- *          背包里的普通物品节点只能挂同类子节点(堆叠规则,功能节点除外);
+ *          跨区整树禁止(双向"一次一个":放置走 placeItem、回收一条一条);
+ *          世界挂载受处理上限(maxProcess,只数直接子节点);
+ *          背包里的普通物品只能挂同类子节点(堆叠规则,功能节点除外);
  *          不可把节点拖进自己所在面板的子树(防环)。
- *   - 语义:拖进"世界"= 放置,一次只放一个(余下子节点回背包堆叠);
- *          背包内部 = 整堆搬运/合并(把一堆拖到另一堆下面)。
  *   - 虚影完全交给 SortableJS 的 fallback 机制(官方实现,触屏同款),
  *     CSS(.sortable-fallback)只微调宽度与观感。
- *   - 整理延迟到 setTimeout(0),避免与 Sortable 落盘序列竞争。
+ *   - 历史上的两条"落库整理"(settle)已被上游守卫取代删除:
+ *     守卫按数据判定整树后,落进背包/世界的拖拽物都只能是单节点,无需再分拣。
  */
 import type { SortableEvent } from "sortablejs"
 import type { BoardId } from "../stores/game"
@@ -41,9 +42,9 @@ export function setDragging(v: boolean) {
 
 /**
  * 面板树列表 @add:
- * - 从背包拖进世界:根级放置提示一句;堆按"放置"语义只留 1 个(延迟结算);
- * - 任意拖入背包(任意层级):释放与背包不兼容的子树(延迟结算);
+ * - 从背包拖进世界(根级落点):放置提示一句;
  * - 挂上子节点时自动展开(默认折叠的节点获得可见的子树)。
+ * 守卫已按数据拒绝跨区整树,落库物必是单节点——不再需要落库分拣(settle)。
  */
 export function onTreeAdd(
   board: BoardId,
@@ -62,13 +63,6 @@ export function onTreeAdd(
     game.pushLog(`「${getDef(dropped.type).name}」被放置进了世界。`, "info")
   }
   if (owner?.collapsed) owner.collapsed = false
-
-  const target = dropped
-  if (board === "world" && fromBackpack) {
-    setTimeout(() => game.settleWorldDrop(target), 0)
-  } else if (board === "backpack" && !fromBackpack) {
-    setTimeout(() => game.settleBackpackDrop(target), 0)
-  }
 }
 
 /**

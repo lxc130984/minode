@@ -52,16 +52,16 @@ export const ICONS = shallowReactive({ ...LUCIDE_ICONS, ...贴图组件 })
 
 | id | category | 关键 flag | behavior | 说明 |
 |---|---|---|---|---|
-| `explorer` 探索 | functional | worldOnly, permanent, accent #d08a3e | `{explore, durationMs:5000, successRate:0.65, pool:[forest .65, river .35]}` | 世界自带;点击探索 |
-| `backpackNode` 背包 | functional | worldOnly, permanent, **noChildren**, accent #b98a2f | `{view-toggle, view:"backpack"}` | 世界自带;点击开合背包分屏 |
-| `bench` 手工合成 | functional | permanent, **zones:["backpack"]**, accent #8672bd | `{craft}` | 背包自带;**只能在背包** |
-| `waterwheel` 水车 | functional | **maxStack:1**, accent #9c7b4a | `{auto-trigger, intervalMs:3000, poweredBy:"river"}` | 直接挂在河流下即就位,每 3 秒驱动其子节点 |
-| `forest` 森林 | terrain | worldOnly, accent #3d8b57 | — | 空手翻找得木棍/石子;被石斧砍得木头 |
-| `river` 河流 | terrain | worldOnly, accent #2f8f96 | — | 空手捡石子 |
-| `stick` 木棍 | resource(实际 material) | **maxStack:64** | — | 材料 |
+| `explorer` 探索 | functional | worldOnly, permanent, accent #d08a3e | `{explore, durationMs:5000, successRate:0.65, pool:[forest .65, river .35]}` | 世界自带;点击工作 5s 后概率产地形 |
+| `backpackNode` 背包 | functional | worldOnly, permanent, **noChildren**, accent #b98a2f | `{view-toggle, view:"backpack"}` | 世界自带;点击开合背包分屏(即时,不走工作) |
+| `bench` 手工合成 | functional | permanent, **zones:["backpack"]**, accent #8672bd, **workMs:2000** | `{craft}` | 背包自带;**只能在背包**;点击工作 2s 后合成 |
+| `waterwheel` 水车 | functional | **maxStack:1**, **maxProcess:2**, accent #9c7b4a | `{auto-trigger, intervalMs:3000, poweredBy:"river"}` | 直接挂在河流下即就位,每 3 秒驱动其子节点(最多同时驱动两个) |
+| `forest` 森林 | terrain | worldOnly, accent #3d8b57, **workMs:3000** | — | 空手翻找(工作 3s)得木棍/石子;被石斧砍得木头 |
+| `river` 河流 | terrain | worldOnly, accent #2f8f96, **workMs:2500**, **maxProcess:2** | — | 空手捡石子(工作 2.5s);河上最多两台水车 |
+| `stick` 木棍 | resource(实际 material) | **maxStack:64** | — | 材料(未声明 workMs → 缺省 1.5s) |
 | `stone` 石子 | material | **maxStack:64** | — | 材料 |
 | `wood` 木头 | material | **maxStack:64** | — | 材料 |
-| `stoneAxe` 石斧 | tool | **maxStack:1**, accent #8672bd | — | 不可堆叠 |
+| `stoneAxe` 石斧 | tool | **maxStack:1**, **maxProcess:1**, accent #8672bd, **workMs:2000** | — | 不可堆叠;砍柴工作 2s;同时只处理一棵树 |
 
 (注:材料 category 值为 `"material"`,中文标签"资源"。)
 
@@ -85,7 +85,7 @@ export function canPlaceInZone(type, zone) { return zonesOf(type).includes(zone)
 
 **消费方**(不要绕过它们另写判断):
 拖拽守卫 `canDropIntoChildList`、收纳 `nodeToItem`、放置 `placeItem`、
-settle 分拣(`settleBackpackDrop`/`nodeToItem`)、存档校验 `zoneOk`。
+存档校验 `zoneOk`。
 
 ### 2.4 getDef —— 带兜底的查找
 

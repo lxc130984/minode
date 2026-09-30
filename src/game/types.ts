@@ -88,6 +88,18 @@ export interface NodeDef {
    * 工具通常为 1(不可堆叠),材料常为 64。
    */
   maxStack?: number
+  /**
+   * 处理上限:世界区一个节点最多同时挂几个【直接】子节点。
+   * 与背包的堆叠语义(maxStack 数整个子树)相对——世界挂载是"流程",
+   * 斧子只面对它的树,不看子子节点。缺省不限(收集类节点如探索不受限)。
+   */
+  maxProcess?: number
+  /**
+   * 工作时长(ms):触发这个节点(点击/被驱动)后要做事多久才结算,
+   * 期间节点忙碌、行底进度条填充。缺省用 store 的 DEFAULT_WORK_MS;
+   * 探索行为以 behavior.durationMs 为准(优先于本字段)。
+   */
+  workMs?: number
   /** 永久节点:不可被移除、不可凭空消失(探索、手工合成) */
   permanent?: boolean
   /** 功能节点行为 */

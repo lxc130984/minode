@@ -154,7 +154,7 @@ push/索引赋值立刻触发图鉴/配方/图标的重算。**注意**:运行�
 ## 8. 扩展清单(改完自查)
 
 - [ ] registry 集合仍是 shallowReactive?
-- [ ] 新 def 的 zones/maxStack/permanent/behavior 想清楚了吗?
+- [ ] 新 def 的 zones/maxStack/workMs/maxProcess/permanent/behavior 想清楚了吗?
 - [ ] 交互键 `"source>target"` 拼对了吗?
 - [ ] 行为实现是否"按发起节点结算"?
 - [ ] 存档结构变了吗?三处同步(pick/export/import)+ bump SAVE_VERSION?

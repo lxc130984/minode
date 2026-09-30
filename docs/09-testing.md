@@ -24,23 +24,31 @@ minode.registerNode({…})
 ## 2. Store 层测试(推荐:确定性强)
 
 - 状态断言:直接读 `__game.nodes/backpack/log`。
-- **守卫测试**:守卫签名收 HTMLElement,但只用 dataset 和 querySelector,可传假元素:
+- **守卫测试**:守卫只用 `dataset`(nodeId/ntype/zone)+ **状态数据**(子树判定
+  按 dragId 查真实节点,不再看 DOM),传假元素 + 真实节点即可:
 
 ```js
-const fakePile = {
-  dataset: { ntype: "wood", nodeId: "n99", zone: "backpack" },
-  querySelector: () => ({})    // 非空 = "带子节点的整堆"
-}
-__game.canDropIntoChildList(fakePile, "world", undefined)      // false(整堆禁入世界)
-__game.canDropIntoChildList({ dataset:{ntype:"wood",nodeId:"n98",zone:"backpack"}, querySelector:()=>null }, "world", undefined)  // true
+// 前置:g.nodes 里有一把挂了森林的斧头 n4、一棵空闲森林 n5
+const el = (nodeId, ntype, zone) => ({ dataset: { nodeId, ntype, zone } })
+__game.canDropIntoChildList(el("n5", "forest", "tree"), "world", "n4")     // false(石斧处理上限 1/1)
+__game.canDropIntoChildList(el("n4", "stoneAxe", "tree"), "backpack", undefined)  // false(世界整树禁入背包)
+__game.canDropIntoChildList(el("n5", "forest", "tree"), "backpack", undefined)   // false(forest 世界限定)
 ```
 
-- 动作测试:`addItem/placeItem/nodeToItem/craftBench/startExplore`(探索结算:
-  `__game.exploreEndAt = 0; __game.onClock()` 跳过冷却)。
-- **触发特效测试**:点击后 200~400ms(动画中)读行元素类名断言
-  `fx-ok` / `fx-fail`(如石斧挂探索:石斧行 fx-ok、探索行 fx-fail);
-  1.5s 后类应清除。注意:点击行**不再产生 selected 类**(选中只来自详情按钮);
-  页面必须前台可见(fx 类应用在 rAF 里,后台标签页不派帧)。
+- 动作测试:`addItem/placeItem/nodeToItem`(获得/收纳/放置直接生效)。
+- **工作系统测试**(触发不再瞬时结算):
+  ```js
+  __game.clickNode(id)                  // 挂工作,行底进度条出现
+  __game.resolveWork(id)                // 跳过等待,立即结算(测试快捷方式)
+  // 或等真实时长:setTimeout 的准点结算 + onClock 对账双保险
+  ```
+  工作中再 `clickNode(id)` → 日志出现"「xx」还在忙碌中……",进度条不重启;
+  进度条 DOM:行元素内 `.work-track`(动画进行时存在,结算后消失)。
+  注意:点击行**不产生 selected 类**(选中只来自详情按钮)。
+
+- **截图/读 DOM 前确认标签页跑的是新代码**:vite HMR 在后台标签页会推迟
+  重载,旧标签页残留旧 UI(实测截到过已删除的倒计时副标题)。
+  开新标签页或刷新后再断言视觉。
 
 ## 3. ⚠️ 三大假故障(先排除再怀疑代码)
 
@@ -88,7 +96,7 @@ await sleep(200)                         // ★ 停留:50ms 模拟拖放定时�
 // 3) 落手:必须 mouseup(pointerup 无效!见 05 §6.1)
 document.dispatchEvent(new MouseEvent("mouseup",
   { clientX: tx, clientY: ty, bubbles: true, cancelable: true, button: 0, buttons: 0 }))
-await sleep(500)                         // ★ 等 settle(setTimeout 0 + 渲染)
+await sleep(500)                         // ★ 等 Sortable 落盘回写 + 渲染
 // 4) 断言状态(__game)而非 DOM;读 DOM 再等一拍
 ```
 
@@ -103,29 +111,29 @@ await sleep(500)                         // ★ 等 settle(setTimeout 0 + 渲染
 ## 5. 常用验证脚本(store 层)
 
 ```js
-// 完整玩法闭环
+// 完整玩法闭环(工作系统版:clickNode 挂工作,resolveWork 立即结算)
 let g = __game, guard = 0
 while (!g.discovered.includes("forest") && guard++ < 30) {
-  if (!g.exploring) g.clickNode(g.explorerNode.id)
-  if (g.exploring) { g.exploreEndAt = 0; g.onClock() }
+  g.clickNode(g.explorerNode.id)
+  g.resolveWork(g.explorerNode.id)      // 跳过 5s 等待
 }
 guard = 0
 while ((g.countItem("stone")<3 || g.countItem("stick")<2) && guard++ < 400)
-  g.trigger("hand", "forest")
+  g.trigger("hand", "forest")           // 直接结算交互,不走工作
 // 挂料合成
 const bench = g.benchNode
 for (const t of ["stone","stick"]) {
   const p = g.backpack.find(n => n.type === t)
   if (p) { g.backpack.splice(g.backpack.indexOf(p),1); bench.children.push(p) }
 }
-g.clickNode(bench.id)
+g.clickNode(bench.id); g.resolveWork(bench.id)
 // 放置 + 组树 + 砍柴
 g.placeItem(g.backpack.find(n=>n.type==="stoneAxe").id)
 const axe = g.nodes.find(n=>n.type==="stoneAxe")
 const f = g.explorerNode.children.find(c=>c.type==="forest")
 axe.children.push(f)
 g.explorerNode.children = g.explorerNode.children.filter(c=>c.id!==f.id)
-g.clickNode(axe.id)   // → 获得木头
+g.clickNode(axe.id); g.resolveWork(axe.id)   // → 获得木头
 ```
 
 自触发(水车)最省事的验证:**别手动 `onClock()`,就用真实 1s 心跳观察**
@@ -141,10 +149,12 @@ g.nodes.splice(g.nodes.indexOf(wheel), 1); river.children.push(wheel)
 // 把 wheel 移回世界根 → 转 4 秒应 0 产出(失去动力)
 ```
 
-守卫四场景(容量):
+守卫容量场景(堆叠上限 + 处理上限):
 ```js
-// A 单个→满堆:false  B 整堆30→堆40(70>64):false
-// C 整堆30→堆33(63≤64):true  D 满堆内部整理:true
+// 堆叠(背包):单个→满堆:false;整堆30→堆40(70>64):false;
+//             整堆30→堆33(63≤64):true;满堆内部整理:true
+// 处理(世界):石斧(上限1)已挂森林,再挂一棵:false;
+//             水车(上限2)挂第三把斧:false;探索(无上限)挂地形:true
 ```
 
 ## 6. 构建级验证

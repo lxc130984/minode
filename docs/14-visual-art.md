@@ -20,7 +20,7 @@
 │                   :style="def.accent && {color: accent}">     │
 │  NodeItem.vue   : 行结构;名称 :style="accent";行 :style 绑    │
 │                   定 --node-accent CSS 变量;类绑定 selected/  │
-│                   functional/view-toggle/fx-ok/fx-fail/cat-x  │
+│                   functional/view-toggle/work-track/cat-xxx   │
 └───────────────────────────────────────────────────────────────┘
                               ↓ 挂载
 ┌─ 第 3 层:表现(CSS) ─────────────────────────────────────────┐
@@ -135,8 +135,8 @@ lucide 图标用 `currentColor`,所以 **accent 天然作用于图标描边**;
 accent 同时作用三处:
 1. 图标颜色(NodeIcon 内联 style);
 2. 节点名称文字色(NodeItem `:style="def.accent ? { color: def.accent }"`);
-3. 写入行内 CSS 变量 `--node-accent`(NodeItem 行上)——**触发变色动画
-   消费它**(`fx-ok` 渐变染的就是这个色,见 §5),其他样式也可用它,
+3. 写入行内 CSS 变量 `--node-accent`(NodeItem 行上)——**工作进度条
+   消费它**(行底细线填的就是这个色,见 §5),其他样式也可用它,
    记得带 fallback:`var(--node-accent, var(--accent))`,例如:
    ```css
    .row-main.selected { border-left-color: var(--node-accent, var(--accent)); }
@@ -200,7 +200,7 @@ NodeItem 的行(`.row-main`)从左到右:
 | 视图开关 | `.view-toggle` | 名称 700 |
 | 折叠钮 | `.twisty` | 17px;`.rotated` 旋转 90°(transition .12s);无子时 `.invisible` |
 | 名称 | `.nt-name` | accent 内联着色;nowrap |
-| 副标题 | `.nt-sub` | 11px 淡色;`.exploring` 橙色 mono 倒计时;`.view-state` 背包开合态 |
+| 副标题 | `.nt-sub` | 11px 淡色;`.view-state` 背包开合态;`.auto-state` 水车就位态 |
 | 分类标签 | `.nt-cat` + `.cat-xxx` | 10px;terrain 绿 / tool 紫 |
 | 堆徽标 | `.nt-pile` | `×N`(nodeCount),11px mono |
 | 子数胶囊 | `.nt-kids` | 10px,软底+边框圆胶囊 |
@@ -226,8 +226,7 @@ NodeItem 的行(`.row-main`)从左到右:
 
 | 动效 | 触发 | 实现 | 位置 |
 |---|---|---|---|
-| **触发变色** fx-ok | 节点被成功触发(交互有条目/行为完成) | 一道 `--node-accent` 色波从行左扫到右,1.2s | main.css keyframes + NodeItem 订阅 game/fx.ts |
-| **无效变灰** fx-fail | 触发落空(查无交互条目/冷却/缺料) | 灰波左→右扫过 1.2s,警示玩家 | 同上 |
+| **工作进度条** work-track | 节点开始做事(触发挂上工作) | 行底 2px 细线,该类型 accent 色从左向右匀速填满,到点结算后消失 | NodeItem scoped keyframes;数据源 game/work.ts |
 | 折叠箭头旋转 | twisty | transform rotate 90°,0.12s | NodeItem scoped |
 | 行悬停渐变 | :hover | background transition 0.12s | NodeItem scoped |
 | 拖拽占位 | 拖动中 | `.sortable-ghost` opacity .35 | main.css |
@@ -236,48 +235,39 @@ NodeItem 的行(`.row-main`)从左到右:
 | 图鉴浮窗进出 | 开/关 | Vue `<Transition name="float">` opacity+translateY 0.16s | App.vue |
 | 抽屉/对话框 | EP 内建 | el-drawer/el-dialog 自带 | — |
 
-(历史:曾有过 fireFx 图标弹跳 icon-pop + 背景闪 row-pulse,已删除——
-用户反馈不好看,改为上表的按结果渐变。)
+(历史:触发反馈迭代过三轮——①fireFx 图标弹跳+背景闪(嫌潦草)→
+②水平色波/灰波表达成功与无效(嫌花哨,已删)→③工作进度条:
+反馈服务于信息(这件事要做多久)而不是装饰。)
 
-### 5.2 触发特效的架构:事件总线(game/fx.ts)
+### 5.2 工作进度条的架构(game/work.ts)
 
-**事件源与播放分离,这是视觉层的架构预留**:
+**数据与视觉分离**:store 挂工作(reactive Map),NodeItem 拉取渲染:
 
 ```
-store 触发结算点                     game/fx.ts                    NodeItem
-(点击/自动驱动同源)   ──emit──▶  reactive Map<nodeId,{outcome}>  ──watch──▶  播放 CSS 动画
-  triggerNode/trigger              (store 外,不落盘)             .fx-ok / .fx-fail
-  startExplore/resolveExplore
-  craftBench/driveAutoTrigger
+store 触发(triggerNode)           game/work.ts                   NodeItem
+点击/自动驱动同源     ──挂──▶  reactive Map<nodeId, WorkJob>  ──读──▶  .work-track
+  startWork + setTimeout          {kind, endAt, durationMs,       animation-duration
+  resolveWork 到点结算             silent}(store 外,不落盘)      = 剩余时间,scaleX 填充
+  onClock 按 endAt 对账
 ```
 
-- **store 广播结果**:每个结算点 `emitTriggerFx(nodeId, "ok" | "fail")`;
-  `trigger()` 返回结算结果(ok=交互表有条目——产出/风味/掷骰未中都算;
-  fail=查无条目)。父节点被触发自身发 ok,子节点按各自交互结果发——
-  点击沿树传播时逐行点亮/变灰,就是瀑布流。
-- **emit 不受 silent 压制**:静默驱动(水车自动转)只压日志,视觉照播。
-- **Map 按键追踪**:Vue 的 reactive Map 让写入只触达订阅对应节点的行,
-  不惊动整棵树;条目由行卸载时 clearTriggerFx 清理。
-- **NodeItem 播放**:watch 收到事件 → 复位类 → rAF 里**强制 reflow**
-  (读行元素 offsetWidth;rAF 早于样式重算,不强制的话浏览器可能从未
-  观察到"类已移除",动画不会重启——连发与"动画刚结束"窗口都依赖这一步)
-  → 置真播放 → 1350ms 后清类(动画 1.2s)。
-  波的手法:300% 宽 `transparent→tint→transparent` 线性渐变作背景,
-  keyframes 只位移 background-position(**100%→0%**——百分比作用于
-  "容器−图片"宽度差,负值差下 100%→0% 才是左→右;两端各留 35% 透明肩,
-  波起止完全出画),背景图/尺寸写进两个关键帧以压过 hover 等普通声明——
-  改颜色改 tint,改速度改 animation 时长与 FX_HOLD_MS。
+- **进度即剩余时间**:挂载行元素时 `animation-duration = endAt − Date.now()`,
+  CSS `scaleX(0→1)` linear forwards 匀速填满——纯 transform 无布局开销,
+  无 JS 帧驱动;到点结算清掉工作记录,细线随 v-if 消失。
+- **Map 按键追踪**:Vue 的 reactive Map 让写入只触达对应行的 computed,
+  不惊动整棵树;reset/导入存档时 clearAllWork 全清。
+- **颜色**:该类型自己的 accent(`--node-accent`,缺省全局 `--accent`)
+  85% 透明度——2px 细线在浅底上太淡会看不见,刻意不降。
+- **位置**:行底贴边(left/right/bottom 0),行 `overflow: hidden` 裁进
+  圆角;`pointer-events: none` 不挡拖拽手柄。
 
-**keyframes 放在 main.css(非 scoped)的原因**:scoped keyframes 会被编译器
-加哈希后缀,动态类名引用不到。全局动画 + 全局类名(`.row-main.fx-ok`)最稳。
+想改观感:NodeItem scoped 的 `.work-track`(颜色/粗细/位置);
+节奏数值在 registry 的 `workMs`(见 03 §2.1)。
 
-想改触发效果:改 main.css 的 `fx-ok / fx-fail` 两个 keyframes;
-想改持续时长:同步改 NodeItem 里的 `FX_HOLD_MS`(略长于动画时长即可)。
-
-**未来扩展(同一事件源,引擎零改动)**:
-- 错峰瀑布:给事件加 `delayMs` 字段(或按触发深度延迟),NodeItem 延迟起播;
-- 粒子/音效:新组件订阅 `triggerFxOf` 全表,不碰 NodeItem;
-- 按类型差异化:NodeDef 加 fx 相关字段,NodeItem 播放时读取。
+**未来扩展(同一数据源,引擎零改动)**:
+- 完成时的轻反馈:resolveWork 处订阅 endAt 清除瞬间做一次性小动效;
+- 忙碌态扩展:进度条之外加行内"忙碌"图标/文字(读同一个 workOf);
+- 按类型差异化:NodeDef 加进度条样式字段,NodeItem 渲染时读取。
 
 ### 5.3 动效设计原则(项目约定)
 
@@ -376,7 +366,7 @@ glow?: boolean
 | 行长相(卡片式/紧凑) | NodeItem.vue scoped → `.row-main` 及相邻规则 |
 | 选中态样式 | `.row-main.selected` |
 | 堆徽标/子数胶囊 | `.nt-pile` / `.nt-kids` |
-| 触发动画 | main.css `@keyframes fx-ok / fx-fail` + NodeItem `FX_HOLD_MS`;事件源 game/fx.ts(§5.2) |
+| 工作进度条 | NodeItem scoped `.work-track`(颜色/粗细);节奏数值 registry `workMs`;数据源 game/work.ts(§5.2) |
 | 拖拽虚影 | main.css `.sortable-fallback`(只微调,勿换机制) |
 | 拖拽重排速度 | dnd.ts DND_COMMON `animation` |
 | 图鉴浮窗动画 | App.vue `.float-*` 过渡类 |
@@ -394,5 +384,5 @@ glow?: boolean
 - [ ] 触屏(hover:none)下可用性(按钮常显、目标 ≥40px)?
 - [ ] 改了 GameNode 结构的话:SAVE_VERSION + 三处同步?
 - [ ] 深浅色对比度(护眼浅绿底上的淡色文字是刻意分层,别一刀切提黑);
-- [ ] `--node-accent` 已被触发变色动画消费(fx-ok);其他消费点记得 fallback:
+- [ ] `--node-accent` 已被工作进度条消费(work-track);其他消费点记得 fallback:
       `var(--node-accent, var(--accent))`。

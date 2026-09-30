@@ -1,15 +1,20 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from "vue"
+import { computed } from "vue"
 import { VueDraggable } from "vue-draggable-plus"
 import { ChevronRight, Settings2, Ellipsis, PanelRightOpen, PanelRightClose } from "lucide-vue-next"
-import { clearTriggerFx, emitTriggerFx, triggerFxOf } from "../game/fx"
+import { workOf } from "../game/work"
 import { DND_COMMON, onTreeAdd, setDragging, treeGroup } from "../game/dnd"
 import { getDef, getRecipe } from "../game/registry"
 import type { GameNode } from "../game/types"
 import { CATEGORY_LABELS, isStack, nodeCount } from "../game/types"
 import { findNode } from "../game/tree"
 import type { BoardId } from "../stores/game"
-import { autoTriggerBehaviorOf, autoTriggerReady, useGameStore } from "../stores/game"
+import {
+  autoTriggerBehaviorOf,
+  autoTriggerReady,
+  occupierOfWorkingAncestor,
+  useGameStore,
+} from "../stores/game"
 import { useUiStore } from "../stores/ui"
 import NodeIcon from "./NodeIcon.vue"
 
@@ -33,11 +38,22 @@ const hiddenCount = computed(() =>
   isItemStack.value ? Math.max(0, children.value.length - 4) : 0,
 )
 const catLabel = computed(() => CATEGORY_LABELS[def.value.category])
+/** 世界里的处理上限徽标:N/M(石斧 1/1、水车 2/2);背包堆上限仍走 ×N 徽标 */
+const kidsMax = computed(() =>
+  props.board === "world" && typeof def.value.maxProcess === "number"
+    ? def.value.maxProcess
+    : null,
+)
 /** 功能节点带行为(探索/合成/视图开关等) */
 const isFunctional = computed(() => !!def.value.behavior)
 /** 视图开关节点(背包):点击开合分屏 */
 const isViewToggle = computed(() => def.value.behavior?.kind === "view-toggle")
 const noChildren = computed(() => !!def.value.noChildren)
+/** 被占用:祖上有正在进行的工作(如石斧正在砍的森林)——半透明置灰,
+ *  点击会被引擎拦下并提示;与 store 触发前置检查共用同一口径 */
+const occupied = computed(() =>
+  !!occupierOfWorkingAncestor(game.boardRoots(props.board), props.node),
+)
 
 const benchRecipeName = computed(() => {
   if (props.node.type !== "bench") return null
@@ -61,49 +77,32 @@ const autoSub = computed(() => {
 })
 
 /**
- * 触发特效:订阅本节点在事件总线上的条目,成功一道主色波左→右扫过、无效灰波。
- * 事件由 store 的触发结算点广播(点击/自动驱动同源),本组件只负责播放。
- * 复位→下一帧置真 + 强制 reflow(offsetWidth),保证连发(含动画刚结束的
- * 窗口)时 CSS 动画都能从头重播——rAF 早于样式重算,不强制 reflow 的话
- * 浏览器可能从未观察到"类已移除",动画不会重启。
+ * 工作进度条:节点开始做事(triggerNode 挂上工作)时,行底一条细线
+ * 从左到右匀速填满,到点结算后消失。纯 CSS transform 动画,无 JS 帧驱动。
+ * duration = 总时长、delay = -已耗时:中途(折叠/展开)重挂载也能从真实比例续走。
  */
-const FX_HOLD_MS = 1350 // 略长于 1.2s 动画,收尾清除类
-const fxState = ref<"ok" | "fail" | null>(null)
-const rowEl = ref<HTMLElement | null>(null)
-let fxTimer: ReturnType<typeof setTimeout> | undefined
-watch(
-  () => triggerFxOf(props.node.id),
-  (ev) => {
-    if (!ev) return
-    fxState.value = null
-    requestAnimationFrame(() => {
-      void rowEl.value?.offsetWidth
-      fxState.value = ev.outcome
-      clearTimeout(fxTimer)
-      fxTimer = setTimeout(() => (fxState.value = null), FX_HOLD_MS)
-    })
-  },
-)
-onUnmounted(() => {
-  clearTimeout(fxTimer)
-  clearTriggerFx(props.node.id)
+const work = computed(() => workOf(props.node.id))
+const workStyle = computed(() => {
+  const j = work.value
+  if (!j) return undefined
+  const left = Math.max(0, j.endAt - Date.now())
+  const elapsed = Math.max(0, j.durationMs - left)
+  return { animationDuration: `${j.durationMs}ms`, animationDelay: `-${elapsed}ms` }
 })
 
 /** 点击:视图开关节点切换分屏;功能节点(按 behavior 分发)任何面板都触发;
  *  普通节点只在"世界"里触发(父触发子/空手),背包里无反应。
- *  点击不再选中节点——节点是可拖动的按钮,不需要选中态;
- *  selectedId 只由「详情/选择配方」按钮设置,用于联动检查器。 */
+ *  触发 = 开始工作(行底进度条),到点才结算;忙碌中再点无效。
+ *  点击不选中节点——selectedId 只由「详情/选择配方」按钮设置,联动检查器。 */
 function onRowClick() {
   if (isViewToggle.value) {
     const view = def.value.behavior?.kind === "view-toggle" ? def.value.behavior.view : "backpack"
     if (view === "codex") ui.toggleCodex()
     else ui.toggleBackpack()
-    emitTriggerFx(props.node.id, "ok") // 开关成功即反馈
     return
   }
   const clickable = isFunctional.value || props.board === "world"
   if (clickable) {
-    // 特效由 store 的触发结算点按结果广播(成功变色/无效变灰)
     game.clickNode(props.node.id)
   }
 }
@@ -127,15 +126,8 @@ function openRecipe() {
     :data-zone="board === 'world' ? 'tree' : 'backpack'"
   >
     <div
-      ref="rowEl"
       class="row-main"
-      :class="{
-        selected,
-        'fx-ok': fxState === 'ok',
-        'fx-fail': fxState === 'fail',
-        functional: isFunctional,
-        'view-toggle': isViewToggle,
-      }"
+      :class="{ selected, occupied, functional: isFunctional, 'view-toggle': isViewToggle }"
       :style="def.accent ? { '--node-accent': def.accent } : undefined"
       @click="onRowClick"
     >
@@ -153,10 +145,7 @@ function openRecipe() {
         {{ def.name }}
       </span>
       <span v-if="node.type === 'bench'" class="nt-sub">配方 · {{ benchRecipeName }}</span>
-      <span v-if="node.type === 'explorer' && game.exploring" class="nt-sub exploring">
-        {{ game.exploreCdLeft }}s
-      </span>
-      <span v-else-if="isViewToggle" class="nt-sub view-state" :class="{ open: ui.backpackOpen }">
+      <span v-if="isViewToggle" class="nt-sub view-state" :class="{ open: ui.backpackOpen }">
         <component :is="ui.backpackOpen ? PanelRightClose : PanelRightOpen" :size="12" />
         {{ ui.backpackOpen ? "已开启" : "已收起" }}
       </span>
@@ -168,7 +157,9 @@ function openRecipe() {
       </span>
       <span class="nt-fill" />
       <span v-if="isItemStack" class="nt-pile mono">×{{ stackTotal }}</span>
-      <span v-else-if="hasChildren && !noChildren" class="nt-kids mono">{{ children.length }}</span>
+      <span v-else-if="hasChildren && !noChildren" class="nt-kids mono">
+        {{ children.length }}{{ kidsMax ? `/${kidsMax}` : "" }}
+      </span>
       <button
         v-if="node.type === 'bench'"
         class="row-act"
@@ -180,6 +171,8 @@ function openRecipe() {
       <button class="row-act" title="详情" @click.stop="openInspector">
         <Ellipsis :size="14" />
       </button>
+      <!-- 工作进度条:做事时行底细线从左向右匀速填满,到点结算后消失 -->
+      <span v-if="work" class="work-track" :style="workStyle" />
     </div>
 
     <!-- 子列表:展开时渲染;空列表(含折叠的空节点)在拖拽时显示为投放区;
@@ -219,6 +212,8 @@ function openRecipe() {
 
 /* org 式行节点:全宽、无边框、无垂直间隙 */
 .row-main {
+  position: relative;
+  overflow: hidden; /* 进度条贴着行底走,裁进行圆角 */
   display: flex;
   align-items: center;
   gap: 7px;
@@ -244,6 +239,10 @@ function openRecipe() {
 .row-main.selected {
   background: var(--accent-soft);
   border-left-color: var(--accent);
+}
+/* 被占用(祖上工作正在进行):整行淡化,示意它是流程参与物、暂不可自行触发 */
+.row-main.occupied {
+  opacity: 0.55;
 }
 .row-main.functional .nt-name {
   font-weight: 600;
@@ -285,10 +284,6 @@ function openRecipe() {
   font-size: 11px;
   color: var(--fg-faint);
   white-space: nowrap;
-}
-.nt-sub.exploring {
-  color: var(--orange);
-  font-family: var(--mono);
 }
 .nt-sub.view-state {
   display: inline-flex;
@@ -361,6 +356,29 @@ function openRecipe() {
 .row-act:hover {
   background: var(--active);
   color: var(--fg);
+}
+
+/* 工作进度条:行底一条 2px 细线,从左向右匀速填满该类型自己的主色;
+   时长内联 = 剩余工作时间,scaleX 走 GPU 不触发布局。
+   透明度刻意高(85%):2px 的细线在浅底上太淡会直接看不见 */
+.work-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: color-mix(in srgb, var(--node-accent, var(--accent)) 85%, transparent);
+  transform-origin: 0 50%;
+  animation: work-fill linear forwards;
+  pointer-events: none;
+}
+@keyframes work-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
 }
 /* 触屏设备:常显操作按钮 */
 @media (hover: none) {
