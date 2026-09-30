@@ -159,7 +159,7 @@ function openRecipe() {
         :depth="depth + 1"
       />
     </VueDraggable>
-    <div v-if="hiddenCount > 0" class="stack-ellipsis mono">⋯ 还有 {{ hiddenCount }} 个</div>
+    <div v-if="hiddenCount > 0 && !node.collapsed" class="stack-ellipsis mono">⋯ 还有 {{ hiddenCount }} 个</div>
   </li>
 </template>
 
