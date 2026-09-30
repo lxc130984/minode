@@ -102,6 +102,7 @@ export const NODE_DEFS: NodeDef[] = shallowReactive([
     name: "木棍",
     category: "material",
     icon: "stick",
+    maxStack: 64,
     desc: "枯枝断木。既是合成的材料,也可以摆成节点——虽然它自己并不会做什么。",
   },
   {
@@ -109,6 +110,7 @@ export const NODE_DEFS: NodeDef[] = shallowReactive([
     name: "石子",
     category: "material",
     icon: "stone",
+    maxStack: 64,
     desc: "一块称手的石头。是石器时代一切工具的起点。",
   },
   {
@@ -116,6 +118,7 @@ export const NODE_DEFS: NodeDef[] = shallowReactive([
     name: "木头",
     category: "material",
     icon: "wood",
+    maxStack: 64,
     desc: "用石斧砍下的木料。文明的基石,暂时先囤着。",
   },
   {
@@ -123,6 +126,7 @@ export const NODE_DEFS: NodeDef[] = shallowReactive([
     name: "石斧",
     category: "tool",
     icon: "stoneAxe",
+    maxStack: 1,
     accent: "#8672bd",
     desc: "石头绑上木棍制成的斧头。把它拖到世界,再把森林挂在它下面,点击它就会砍伐森林。",
   },

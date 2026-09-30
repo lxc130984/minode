@@ -105,12 +105,16 @@ const meta = computed(() =>
   overflow: auto;
   padding: 8px;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
+/* 根列表撑满整个面板高度:下方的空白区域仍是可投放区 */
 .root-list {
   list-style: none;
   margin: 0;
-  padding: 0;
-  min-height: 80px;
+  padding: 0 0 28px 0;
+  flex: 1 1 auto;
+  min-height: 120px;
 }
 .empty-hint {
   color: var(--fg-faint);

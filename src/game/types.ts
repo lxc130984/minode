@@ -70,6 +70,11 @@ export interface NodeDef {
   zones?: NodeZone[]
   /** 禁止挂载子节点(如「背包」节点:不可折叠、不可挂载,但可挂到其他节点上) */
   noChildren?: boolean
+  /**
+   * 一堆同类物品的最大数量(父节点 + 子节点);缺省不限。
+   * 工具通常为 1(不可堆叠),材料常为 64。
+   */
+  maxStack?: number
   /** 永久节点:不可被移除、不可凭空消失(探索、手工合成) */
   permanent?: boolean
   /** 功能节点行为 */

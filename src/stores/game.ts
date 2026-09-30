@@ -17,6 +17,17 @@ import {
   rollDrops,
   rollPool,
 } from "../game/registry"
+
+/** 该类型一堆物品的最大数量(缺省不限) */
+function stackLimit(type: string): number {
+  const ms = getDef(type).maxStack
+  return typeof ms === "number" && ms > 0 ? ms : Infinity
+}
+
+/** 该类型节点还能挂多少个子节点(堆容量 = maxStack - 1 自己) */
+function childCapacity(type: string): number {
+  return stackLimit(type) - 1
+}
 import type { GameNode, LogEntry, LogKind } from "../game/types"
 import { countNodes, findNode, isAncestorOf, removeNode } from "../game/tree"
 
@@ -457,12 +468,14 @@ export const useGameStore = defineStore("game", {
       this.pushLog(`「${def.name}」已收进背包。`, "info")
     },
 
-    /** 把一个节点并入背包堆(同类挂到最近一堆下,否则成为新根) */
+    /** 把一个节点并入背包堆(挂到最近一个还有空位的同类堆下,否则成为新根) */
     stackIntoBackpack(node: GameNode) {
-      const root = [...this.backpack].reverse().find((n) => n.type === node.type)
+      const cap = childCapacity(node.type)
+      const root = [...this.backpack]
+        .reverse()
+        .find((n) => n.type === node.type && n.children.length < cap)
       if (root) {
         root.children.push(node)
-        if (root.collapsed) root.collapsed = false
       } else {
         this.backpack.push(node)
       }
@@ -505,17 +518,29 @@ export const useGameStore = defineStore("game", {
       if (!canPlaceInZone(type, "backpack")) {
         for (let i = 0; i < count; i++) this.nodes.push(this.makeNode(type))
       } else {
-        const root = [...this.backpack].reverse().find((n) => n.type === type)
-        if (root) {
-          for (let i = 0; i < count; i++) root.children.push(this.makeNode(type))
-          if (root.collapsed) root.collapsed = false
-        } else if (count > 1) {
-          const pile = this.makeNode(type)
-          for (let i = 1; i < count; i++) pile.children.push(this.makeNode(type))
-          pile.collapsed = false
-          this.backpack.push(pile)
-        } else {
-          this.backpack.push(this.makeNode(type))
+        // 按组堆叠:优先并入最近一个还有空位的同类堆,满了就开新堆
+        let left = count
+        while (left > 0) {
+          const cap = childCapacity(type)
+          const root = [...this.backpack]
+            .reverse()
+            .find((n) => n.type === type && n.children.length < cap)
+          if (root) {
+            const take = Math.min(left, cap - root.children.length)
+            for (let i = 0; i < take; i++) root.children.push(this.makeNode(type))
+            left -= take
+          } else {
+            // 新堆:自己 + 剩余子节点(不自动展开,徽标会显示总数)
+            const pile = this.makeNode(type)
+            const take = Math.min(left, cap)
+            for (let i = 1; i <= take && left > 1; i++) {
+              pile.children.push(this.makeNode(type))
+              left--
+            }
+            left--
+            this.backpack.push(pile)
+            if (left <= 0) break
+          }
         }
       }
       if (!silent) this.pushLog(`获得 ${def.name} ×${count}`, "gain")
@@ -613,18 +638,30 @@ export const useGameStore = defineStore("game", {
     },
 
     // ── 拖拽辅助 ─────────────────────────────────────────
-    /** 拖拽守卫:节点是否可以放入 board 上 owner 的子列表(区域权限 + 同类堆规则 + 防环) */
+    /**
+     * 拖拽守卫:节点是否可以放入 board 上 owner 的子列表。
+     * - 区域权限(zones);
+     * - 从背包拖"整堆"(带子节点的父节点)进世界 → 拒绝,防止一次性放置大量物品;
+     *   拖单个子节点进世界 → 允许;背包内部(如挂到手工合成下)不受此限;
+     * - 背包里的普通物品:子级只能挂同类(堆叠规则)且堆未满;功能节点不受限;
+     * - 防环(不可拖进自己的子树)。
+     */
     canDropIntoChildList(dragEl: HTMLElement, board: BoardId, ownerId: string | undefined): boolean {
       const type = dragEl.dataset.ntype
       if (type && !canPlaceInZone(type, board)) return false
+      if (board === "world" && dragEl.dataset.zone === "backpack") {
+        // 整堆父节点(带有子节点)不允许拖进世界
+        if (dragEl.querySelector(":scope > ol.child-list .node-wrap")) return false
+      }
       const dragId = dragEl.dataset.nodeId
       if (!dragId || !ownerId) return true
       const owner = findNode(this.boardRoots(board), ownerId)?.node
       if (!owner) return true
-      // 背包里的普通物品:子级只能挂同类(堆叠规则);功能节点(合成台等)不受限
       const ownerDef = getDef(owner.type)
-      if (board === "backpack" && !ownerDef.behavior && type && type !== owner.type) {
-        return false
+      if (board === "backpack" && !ownerDef.behavior) {
+        // 普通物品:子级只能挂同类,且堆未满
+        if (type && type !== owner.type) return false
+        if (owner.children.length >= childCapacity(owner.type)) return false
       }
       return !isAncestorOf(this.boardRoots(board), dragId, ownerId)
     },
