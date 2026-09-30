@@ -136,7 +136,7 @@ export function isSaveValid(saved: unknown): boolean {
   if (!Array.isArray(s.backpack) || !s.backpack.every(nodeOk)) return false
   // 世界自带探索与背包开关;手工合成可以在世界或背包
   const worldTypes = new Set<string>()
-  const allTypes = new Set<string>()
+  const bpTypes = new Set<string>()
   const collect = (ns: GameNode[], into: Set<string>) => {
     for (const n of ns) {
       into.add(n.type)
@@ -144,8 +144,7 @@ export function isSaveValid(saved: unknown): boolean {
     }
   }
   collect(s.nodes as GameNode[], worldTypes)
-  collect(s.nodes as GameNode[], allTypes)
-  collect(s.backpack as GameNode[], allTypes)
+  collect(s.backpack as GameNode[], bpTypes)
   // 区域不变量:背包树里不应出现进不了背包的类型
   const zoneOk = (ns: GameNode[], zone: "world" | "backpack"): boolean =>
     ns.every((n) => canPlaceInZone(n.type, zone) && zoneOk(n.children, zone))
@@ -153,8 +152,6 @@ export function isSaveValid(saved: unknown): boolean {
   if (!worldTypes.has("explorer")) return false
   if (!worldTypes.has("backpackNode")) return false
   // 手工合成必须留在背包(不允许在世界侧存档里残留)
-  const bpTypes = new Set<string>()
-  collect(s.backpack as GameNode[], bpTypes)
   if (!bpTypes.has("bench")) return false
   // uid 必须不小于已有 n<数字> id 的最大后缀,避免 newNodeId 撞 id
   let maxId = 0
