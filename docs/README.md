@@ -18,6 +18,7 @@
 | [11-pitfalls.md](11-pitfalls.md) | 历史踩坑实录(每个 bug 的根因/修复/教训,含 commit 号) | **每次改代码前** |
 | [12-glossary.md](12-glossary.md) | 项目自造术语表 | 遇到黑话时 |
 | [13-deployment.md](13-deployment.md) | 部署与 CI:GitHub Pages、Actions 工作流、注意事项 | 发版/改仓库时 |
+| [14-visual-art.md](14-visual-art.md) | 视觉与艺术创作:图标/配色/行样式/动效的架构与改法、扩展新视觉钩子 | 改外观/加美术内容时 |
 
 ## 快速事实卡
 

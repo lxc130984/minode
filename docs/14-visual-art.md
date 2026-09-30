@@ -1,0 +1,355 @@
+# 14 · 视觉与艺术创作指南(图标 / 配色 / 样式 / 动效)
+
+> 面向"想改外观"的 AI / 美术向开发。先讲清**视觉决策链的架构**,
+> 再逐项给"改什么 → 去哪改 → 怎么改"的操作说明,最后是动效设计与扩展新视觉钩子的方法。
+
+---
+
+## 1. 架构总览:视觉决策链(三层)
+
+```
+┌─ 第 1 层:数据(每个节点类型一份) ────────────────────────────┐
+│  registry.ts → NodeDef                                        │
+│    icon:    "forest"     ← 图标键(指向 ICONS 映射)          │
+│    accent:  "#3d8b57"    ← 该类型的视觉主色(css color)       │
+│    category:"terrain"    ← 间接决定分类小标签的颜色类          │
+└───────────────────────────────────────────────────────────────┘
+                              ↓ 消费
+┌─ 第 2 层:组件(把数据翻译成 DOM) ────────────────────────────┐
+│  NodeIcon.vue   : <component :is="ICONS[def.icon] ?? hand"    │
+│                   :style="def.accent && {color: accent}">     │
+│  NodeItem.vue   : 行结构;名称 :style="accent";行 :style 绑    │
+│                   定 --node-accent CSS 变量;类绑定 selected/  │
+│                   functional/view-toggle/trigger-fx/cat-xxx   │
+└───────────────────────────────────────────────────────────────┘
+                              ↓ 挂载
+┌─ 第 3 层:表现(CSS) ─────────────────────────────────────────┐
+│  styles/main.css : 全局主题(:root 调色板/尺寸/字体变量)、    │
+│                    Element Plus 对齐、拖拽反馈、触发动画        │
+│  NodeItem <style scoped> : 行/徽标/折叠钮等结构样式            │
+│  各组件 <style scoped>    : 自己的布局样式                      │
+└───────────────────────────────────────────────────────────────┘
+```
+
+**核心约定:样式是"按类型"而不是"按实例"**——同一 type 的所有节点共享一套外观
+(这正是"换个图标/配色 = 改一条 def"的原因)。若未来需要每实例皮肤,
+见 §7.3 的扩展路径。
+
+另一个关键事实:**主题色全部走 CSS 变量**(`:root` 里的 `--accent` 等),
+组件样式只引用变量——所以换全局配色只动 main.css 一处。
+
+---
+
+## 2. 给节点/物品换图标
+
+### 2.1 方法一:改用已有图标(最快)
+
+```ts
+// registry.ts → NODE_DEFS 里对应 def
+{ id: "wood", icon: "logs" → 改成 ICONS 里已有的任何键,如 "stick" }
+```
+可用键 = ICONS 的键名(forest / river / stone / stick / wood / stoneAxe /
+hand / explorer / bench / backpackNode)。
+
+### 2.2 方法二:注册一个新 lucide 图标(常规)
+
+```ts
+// registry.ts 顶部 import,再进 ICONS:
+import { Flame } from "lucide-vue-next"
+ICONS.flame = markRaw(Flame)      // shallowReactive 对象,可直接索引赋值
+// 然后 def.icon: "flame"
+```
+
+⚠️ **lucide 图标名随版本变动**(例:`HelpCircle` 已不存在、
+`MoreVertical→EllipsisVertical`、`TerminalSquare→SquareTerminal`)。
+引用前必须验证存在:
+
+```bash
+grep "declare const Flame:" node_modules/lucide-vue-next/dist/lucide-vue-next.d.ts
+```
+
+⚠️ 必须 `markRaw()` 包裹——否则 Vue 会代理组件对象(性能 + 潜在告警)。
+
+### 2.3 方法三:任意 SVG(突破 lucide 限制)
+
+lucide 的组件就是渲染 `<svg>` 的函数组件,自定义 SVG 包装成同样接口即可:
+
+```tsx
+// 任意接受 { size } props 返回 svg 的函数组件
+const MyGem = (props: { size?: number }) =>
+  h('svg', { width: props.size ?? 15, height: props.size ?? 15, viewBox: '0 0 24 24' },
+    h('path', { d: 'M12 2 L22 12 L12 22 L2 12 Z', fill: 'currentColor' }))
+ICONS.myGem = markRaw(MyGem)
+```
+
+### 2.4 方法四:运行时(不改源码,试玩/差异化)
+
+```js
+import { Flame } from "lucide-vue-next"        // 控制台里可用 window 上的
+minode.registerIcon("flame", Flame)             // DEV 下已挂 window.minode
+minode.registerNode({ ...def, icon: "flame" })  // 覆盖或新建
+```
+运行时注册**不持久化**(刷新即失),适合验证效果后再落进 registry.ts。
+
+### 2.5 图标渲染链细节(NodeIcon.vue 全文即 18 行)
+
+```
+ICONS[getDef(type).icon] ?? ICONS.hand   ← 未知类型兜底手型图标
+:size="size ?? 15"
+class="nt-icon cat-{category}"           ← 分类类(可做图标底色/滤镜钩子)
+:style="def.accent ? { color: accent } : undefined"   ← 主色着色
+```
+lucide 图标用 `currentColor`,所以 **accent 天然作用于图标描边**。
+
+---
+
+## 3. 给节点换配色
+
+### 3.1 单类型主色:NodeDef.accent
+
+```ts
+{ id: "forest", accent: "#3d8b57", … }
+```
+accent 同时作用三处:
+1. 图标颜色(NodeIcon 内联 style);
+2. 节点名称文字色(NodeItem `:style="def.accent ? { color: def.accent }"`);
+3. 写入行内 CSS 变量 `--node-accent`(NodeItem 行上)——**预留钩子,
+   当前 CSS 尚未消费**,想做"选中边框用各自主色"时直接用它:
+   ```css
+   .row-main.selected { border-left-color: var(--node-accent, var(--accent)); }
+   ```
+
+任何合法 css color 都行:`#hex` / `rgb()` / `var(--orange)` 等。
+
+### 3.2 分类小标签颜色
+
+行内分类标签(`地形/资源/工具/功能`)按 category 着色,
+在 **NodeItem 的 scoped style** 里:
+
+```css
+.nt-cat.cat-terrain { color: var(--green); }   /* 地形绿 */
+.nt-cat.cat-tool    { color: var(--purple); }  /* 工具紫 */
+/* material 无规则 → 默认 --fg-faint */
+```
+改法:改这里的 `var(...)` 或新增 `.nt-cat.cat-xxx` 规则。
+
+### 3.3 全局主题(整套配色)
+
+**只改 `styles/main.css` 的 `:root`**,全站跟随(组件只引用变量):
+
+| 变量 | 用途 | 当前值 |
+|---|---|---|
+| `--bg` / `--bg-panel` / `--bg-soft` | 页面底 / 面板底 / 软底 | #f3f6ec / #fff / #f8faf3 |
+| `--hover` / `--active` | 行悬停 / 按下 | #edf3e3 / #e2eed4 |
+| `--border` / `--guide` | 边框 / 缩进引导线 | #e2e8d6 / #dde6cd |
+| `--fg` / `--fg-dim` / `--fg-faint` | 文字三档 | #37423a / #6e7d6f / #9aa896 |
+| `--accent` / `--accent-soft` | 主色 / 主色淡底(选中态) | #3d8b57 / rgba |
+| `--green/--orange/--red/--purple/--cyan` | 语义色(日志/标签) | … |
+| `--row-h/--topbar-h/--status-h` | 尺寸(触屏自动放大行高,见 §6.5) | 34/48/26px |
+| `--mono/--sans` | 字体栈 | … |
+| `--radius/--shadow` | 圆角 / 阴影 | 10px / … |
+
+另外三处全局视觉:
+- `body` 背景:一层超淡径向渐绿渐变 + `--bg`(换暗色主题时改这里和调色板);
+- Element Plus 对齐:`--el-color-primary: var(--accent)` 等(按钮/抽屉跟随主色);
+- 滚动条:细 + #c9d6bb。
+
+**做暗色主题的最小步骤**:复制一份 `:root` 值改为暗色 →(可选)加
+`prefers-color-scheme` 媒体查询或手动切换 `html.dark` 类;组件无需动。
+注意 EP 也有暗色包(`element-plus/theme-chalk/dark/css-vars.css`),历史上用过又移除。
+
+---
+
+## 4. 行节点样式解剖(改"长相"的主战场)
+
+NodeItem 的行(`.row-main`)从左到右:
+
+```
+[twisty ▸] [NodeIcon] [名称] [副标题/分类标签] [flex填充] [×N徽标|子数胶囊] [⚙(bench)] [⋯]
+```
+
+| 元素 | 类名 | 关键样式(scoped,NodeItem) |
+|---|---|---|
+| 行容器 | `.row-main` | 全宽、高 var(--row-h)、无边框、左 2px 透明边、圆角 7、user-select:none |
+| 悬停/按下 | `:hover/:active` | `--hover`/`--active` 底色 |
+| 选中 | `.selected` | `--accent-soft` 底 + 左边框染 `--accent` |
+| 功能节点 | `.functional` | 名称 600 加粗 |
+| 视图开关 | `.view-toggle` | 名称 700 |
+| 折叠钮 | `.twisty` | 17px;`.rotated` 旋转 90°(transition .12s);无子时 `.invisible` |
+| 名称 | `.nt-name` | accent 内联着色;nowrap |
+| 副标题 | `.nt-sub` | 11px 淡色;`.exploring` 橙色 mono 倒计时;`.view-state` 背包开合态 |
+| 分类标签 | `.nt-cat` + `.cat-xxx` | 10px;terrain 绿 / tool 紫 |
+| 堆徽标 | `.nt-pile` | `×N`(nodeCount),11px mono |
+| 子数胶囊 | `.nt-kids` | 10px,软底+边框圆胶囊 |
+| 行尾按钮 | `.row-act` | 24px;透明度 .35(悬停/选中→1;触屏恒 .55);hover 底色 |
+
+**子列表**(`.child-list`):缩进 18px + 1px 左引导线(`--guide`);
+空列表不画线(避免残留短竖线);`.stack-list`(堆)下
+`> .node-wrap:nth-child(n+5){display:none}` 占位隐藏;省略行 `.stack-ellipsis`
+在列表外、`pointer-events:none`。
+
+**改"行风格"的典型操作**:
+- 想要卡片式(有边框/间距):改 `.row-main` 加 border/margin —— 但注意拖拽索引
+  依赖 DOM 顺序而非视觉,加间距安全;加**外边距**会影响咬合区定位,需同步调
+  `.app.dragging .child-list.is-empty` 的负 margin 值;
+- 想改选中样式:`.row-main.selected`;
+- 想改堆徽标:`.nt-pile`。
+
+---
+
+## 5. 动效设计
+
+### 5.1 现有动效清单
+
+| 动效 | 触发 | 实现 | 位置 |
+|---|---|---|---|
+| **触发脉冲** row-pulse | 点击可交互节点 | 背景 `--accent-soft` → 透明 0.55s | main.css + NodeItem fireFx |
+| **图标弹跳** icon-pop | 同上(同一 class) | scale 1→1.3 rotate(-8°)→1,0.45s | main.css |
+| 折叠箭头旋转 | twisty | transform rotate 90°,0.12s | NodeItem scoped |
+| 行悬停渐变 | :hover | background transition 0.12s | NodeItem scoped |
+| 拖拽占位 | 拖动中 | `.sortable-ghost` opacity .35 | main.css |
+| 拖拽虚影 | fallback 拖动 | 库克隆 + CSS 微调(§5.4) | main.css |
+| 列表重排动画 | 拖放 | SortableJS `animation:150` | DND_COMMON |
+| 图鉴浮窗进出 | 开/关 | Vue `<Transition name="float">` opacity+translateY 0.16s | App.vue |
+| 抽屉/对话框 | EP 内建 | el-drawer/el-dialog 自带 | — |
+
+### 5.2 触发脉冲的实现机制(为什么这么绕)
+
+```ts
+// NodeItem.vue
+const fx = ref(false)
+function fireFx() {
+  fx.value = false                                  // ① 先复位(允许连点重触发)
+  requestAnimationFrame(() => {                     // ② 下一帧再置真,
+    fx.value = true                                 //    CSS 动画才会从头播放
+    setTimeout(() => (fx.value = false), 600)       // ③ 600ms 后收尾
+  })
+}
+```
+模板:`.row-main` 绑 `:class="{ 'trigger-fx': fx, … }"`。
+直接重复置 true 不会重启 CSS animation——**复位→rAF→置真**是标准重触发手法。
+
+**keyframes 放在 main.css(非 scoped)的原因**:scoped keyframes 会被编译器
+加哈希后缀,跨组件(子组件 NodeIcon 的 `.nt-icon`)与动态插入的元素引用不到。
+全局动画 + 全局类名(`.row-main.trigger-fx`)是最稳的组合。
+
+想改触发效果:改 main.css 的两个 keyframes;想改持续时长:同步改 fireFx 里的
+600ms(略长于动画时长即可)。
+
+### 5.3 动效设计原则(项目约定)
+
+1. **克制、护眼**:淡入淡出/轻位移为主,无弹跳过场、无大面积闪烁;
+2. **短**:交互反馈 ≤600ms,浮层过渡 ~160ms;
+3. **可连发**:fx 用 rAF 重触发;不做"播放中屏蔽点击";
+4. **不阻塞**:全部纯 CSS 动画,无 JS 帧驱动;遵循 `prefers-reduced-motion`
+   的适配还没做(可作为改进项);
+5. **有语义**:gain 绿 / warn 橙 / craft 紫(日志与状态栏共用语义色变量)。
+
+### 5.4 拖拽虚影(重要约定:不要自造)
+
+虚影 = SortableJS `forceFallback` 机制的官方克隆(跟随指针),我们只微调:
+
+```css
+/* main.css */
+.sortable-fallback {
+  width: min(70vw, 320px) !important;   /* 库写了内联宽高,必须 !important 覆盖 */
+  height: auto !important;
+  opacity: 0.92; border-radius: 8px;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  box-shadow: 0 8px 22px rgba(50,80,50,.22);
+  overflow: hidden;
+}
+.sortable-fallback .child-list { display: none !important; }  /* 只带一行不带子树 */
+```
+历史教训:自制 setDragImage 预览图、原生 DnD 默认虚影都试过被弃——
+**改虚影观感只动这两个规则**,不要换机制(用户明确要求用库的方案)。
+
+---
+
+## 6. 响应式与触屏
+
+1. **断点**:`@media (hover: none)`(触屏)在 `:root` 放大 `--row-h` 到 40px,
+   NodeItem 里把 `.row-act` 常显(opacity .55);其余布局断点 900px(App/各组件)。
+2. **拖拽 vs 滚动**:`delay:150 + delayOnTouchOnly`(按住 150ms 才拖)。
+3. **边缘手势**:App.vue 左缘右滑开图鉴、右缘左滑开检查器
+   (起点在 `[data-node-id]` 上不触发,避免和拖拽打架)。
+4. `user-select:none` 全部可拖动元素(main.css `.row-main` 等规则)——需求方明确要求。
+5. 省略行/咬合区都考虑了手指目标尺寸(咬合区 ≥14px + emptyInsertThreshold 12)。
+
+---
+
+## 7. 扩展新的视觉钩子(架构方法)
+
+### 7.1 标准三步:加 def 字段 → 绑类/样式 → 写 CSS
+
+以"给某类节点加发光"为例:
+
+```ts
+// ① types.ts NodeDef 加字段
+glow?: boolean
+
+// ② registry.ts 给想要的 def 设 true(如 stoneAxe)
+
+// ③ NodeItem.vue 行上绑类
+:class="{ …, 'has-glow': def.glow }"
+
+// ④ CSS(scoped 可,若涉及子组件用全局)
+.row-main.has-glow .nt-icon { filter: drop-shadow(0 0 4px var(--node-accent, var(--accent))); }
+```
+文字类自定义(chipLabel/chipColor)、行底色(rowTint)、徽标形状等同理。
+**凡是"按类型"的外观差异都走这条路**,引擎零改动。
+
+### 7.2 颜色优先用变量
+
+新样式尽量 `var(--xxx)`;要新语义色就在 `:root` 加变量,
+避免散落的硬编码 hex(现在语义色变量:green/orange/red/purple/cyan)。
+
+### 7.3 每实例皮肤(目前不支持,扩展路径)
+
+现状:外观只由 type 决定。若要"这把石斧是传说品质":
+1. `GameNode` 加可选字段(如 `skin?: string`)——**需 bump SAVE_VERSION**
+   并同步 pick/export/import 三处(见 07);
+2. NodeItem 读 `node.skin` 优先于 def 的视觉字段;
+3. 产出逻辑(addItem/craft)决定何时写 skin。
+
+### 7.4 需要动结构的视觉(改模板)
+
+行内新增元素(如左侧品质色条):NodeItem 模板 + scoped CSS。
+注意三件事:
+- 新元素不要成为拖拽手柄的障碍(手柄是整个 `.row-main`,行内点击目标要 `.stop` 或不响应);
+- 嵌套内容样式引用子组件时 scoped 需 `:deep()`;
+- 别破坏 `nth-child(n+5)` 占位隐藏对 `.node-wrap` 直接子级的假设。
+
+---
+
+## 8. 修改速查表
+
+| 想改什么 | 去哪改 |
+|---|---|
+| 某物品图标 | registry.ts → def.icon(键需在 ICONS 中;新图标先加 ICONS,§2) |
+| 某节点颜色 | registry.ts → def.accent |
+| 分类标签颜色 | NodeItem.vue scoped → `.nt-cat.cat-xxx` |
+| 全局配色/主题 | styles/main.css `:root` 调色板(+ body 背景 + EP 对齐) |
+| 行长相(卡片式/紧凑) | NodeItem.vue scoped → `.row-main` 及相邻规则 |
+| 选中态样式 | `.row-main.selected` |
+| 堆徽标/子数胶囊 | `.nt-pile` / `.nt-kids` |
+| 触发动画 | main.css `@keyframes row-pulse / icon-pop` + fireFx 时长 |
+| 拖拽虚影 | main.css `.sortable-fallback`(只微调,勿换机制) |
+| 拖拽重排速度 | dnd.ts DND_COMMON `animation` |
+| 图鉴浮窗动画 | App.vue `.float-*` 过渡类 |
+| 行高(触屏) | main.css `@media (hover:none)` 的 `--row-h` |
+| 字体 | main.css `--mono / --sans` |
+| 日志/语义色 | `:root` 的 green/orange/red/purple/cyan |
+
+## 9. 检查清单与已知坑
+
+- [ ] lucide 图标名 grep 过 d.ts 确认存在?markRaw 包了?
+- [ ] 新 CSS 用了变量而非硬编码色?
+- [ ] scoped 样式作用到子组件了吗(需要 :deep 吗)?keyframes 需要全局吗?
+- [ ] 覆盖库的内联样式(虚影宽高)用 !important 了吗?
+- [ ] 加间距/边框后,咬合区的负 margin 值还匹配吗?
+- [ ] 触屏(hover:none)下可用性(按钮常显、目标 ≥40px)?
+- [ ] 改了 GameNode 结构的话:SAVE_VERSION + 三处同步?
+- [ ] 深浅色对比度(护眼浅绿底上的淡色文字是刻意分层,别一刀切提黑);
+- [ ] `--node-accent` 是已绑定未消费的预留钩子,消费它时记得 fallback:
+      `var(--node-accent, var(--accent))`。
