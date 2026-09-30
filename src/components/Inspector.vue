@@ -11,7 +11,7 @@ import {
 import { findInteraction, getDef, getRecipe, canPlaceInZone, isPermanent } from "../game/registry"
 import { CATEGORY_LABELS, nodeCount } from "../game/types"
 import { findNode } from "../game/tree"
-import { useGameStore } from "../stores/game"
+import { autoTriggerBehaviorOf, autoTriggerReady, useGameStore } from "../stores/game"
 import { useUiStore } from "../stores/ui"
 import NodeIcon from "./NodeIcon.vue"
 
@@ -40,6 +40,15 @@ const isPile = computed(
 )
 
 const benchRecipe = computed(() => getRecipe(game.selectedRecipeId))
+
+/** 自触发节点(水车等)的驱动状态 */
+const autoTrigger = computed(() => (node.value ? autoTriggerBehaviorOf(node.value) : null))
+const autoReady = computed(() => {
+  const b = autoTrigger.value
+  if (!b || !node.value) return false
+  const roots = inWorld.value ? game.nodes : game.backpack
+  return autoTriggerReady(b, findNode(roots, node.value.id)?.parent ?? null)
+})
 
 const handHint = computed(() =>
   def.value ? findInteraction("hand", def.value.id)?.note : null,
@@ -111,6 +120,28 @@ async function removeSelected() {
           <Settings2 :size="13" style="margin-right: 4px" />
           选择配方
         </el-button>
+      </div>
+      <div v-else-if="autoTrigger" class="stat-box">
+        <div class="stat-row">
+          <span class="k">驱动条件</span>
+          <span class="v">
+            {{ autoTrigger.poweredBy ? `挂在${getDef(autoTrigger.poweredBy).name}下面` : "无需条件" }}
+          </span>
+        </div>
+        <div class="stat-row">
+          <span class="k">驱动间隔</span>
+          <span class="v">每 {{ Math.round(autoTrigger.intervalMs / 1000) }} 秒一次</span>
+        </div>
+        <div class="stat-row">
+          <span class="k">状态</span>
+          <span class="v">{{ autoReady ? "驱动中" : "待就位(不在河流下面)" }}</span>
+        </div>
+        <div class="stat-row">
+          <span class="k">驱动对象</span>
+          <span class="v">
+            {{ children.length ? children.map((c) => getDef(c.type).name).join("、") : "还没有子节点" }}
+          </span>
+        </div>
       </div>
 
       <!-- 普通节点 -->

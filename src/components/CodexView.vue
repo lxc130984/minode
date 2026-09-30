@@ -22,7 +22,7 @@ const groups = computed(() => {
 })
 
 function seen(def: NodeDef): boolean {
-  if (def.behavior) return true // 功能节点天然存在
+  if (def.permanent) return true // 世界自带的常驻节点天然存在
   if (def.category === "terrain") return game.discovered.includes(def.id)
   return (game.ownedMap[def.id] ?? 0) > 0 || hasType(game.nodes, def.id)
 }
@@ -74,6 +74,7 @@ function zoneLabel(def: NodeDef): string {
         <li>把 <b>石子堆</b> 和 <b>木棍堆</b> 整堆拖到「手工合成」下面,点击它合成<b>石斧</b>(3 石子 + 2 木棍)。</li>
         <li>把石斧拖到<b>世界</b>(一次只放置一个),再把森林拖到石斧<b>下方</b>。</li>
         <li>点击<b>石斧</b>:点击会传导到森林,产出木头!</li>
+        <li>用木头合成<b>水车</b>(4 木头 + 2 木棍),把它拖到<b>河流</b>下面,再把石斧挂到水车下面——水流每 3 秒推动水车一次,木头自动进背包。</li>
         <li>背包里同类物品自动堆成一棵小树;把一堆拖到另一堆下面即可合并,拖到世界一次放一个。</li>
         <li>右上角菜单可<b>导出/导入</b>世界存档。</li>
       </ol>

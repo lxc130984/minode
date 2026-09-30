@@ -36,6 +36,18 @@ export interface FactoryBehavior {
   intervalMs: number
 }
 
+/**
+ * 自触发行为:就位后被周期性"驱动",每次驱动依次触发自身的每个子节点
+ * (子节点按"被点击"的语义结算)。如水车挂在河流下,每 3 秒驱动下面的石斧。
+ */
+export interface AutoTriggerBehavior {
+  kind: "auto-trigger"
+  /** 驱动间隔(ms) */
+  intervalMs: number
+  /** 就位条件:必须直接挂在哪个类型的节点下才会被驱动;缺省 = 无需条件 */
+  poweredBy?: string
+}
+
 /** 视图开关行为:点击节点切换某个界面(如「背包」节点开合背包分屏) */
 export interface ViewToggleBehavior {
   kind: "view-toggle"
@@ -46,6 +58,7 @@ export type NodeBehavior =
   | ExploreBehavior
   | CraftBehavior
   | FactoryBehavior
+  | AutoTriggerBehavior
   | ViewToggleBehavior
 
 /** 节点类型定义(注册表条目) */
@@ -55,7 +68,7 @@ export interface NodeDef {
   /** 显示名,如 "森林" */
   name: string
   category: Category
-  /** lucide 图标组件名(在 registry 的 ICONS 中映射) */
+  /** 图标键:像素贴图 = assets/icons/ 下的文件名;线条图标 = game/icons.ts 的 lucide 键 */
   icon: string
   desc: string
   /** 视觉主色(css color):图标与名称着色,自定义材质/外观的入口 */

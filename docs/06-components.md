@@ -8,10 +8,12 @@
 
 1. **游戏心跳**:`useIntervalFn(() => { gameNow.value=Date.now(); game.onClock() }, 1000, {immediateCallback:true})`
    ——时钟在 store 外的原因见 04 §1.4。
-2. **挂载欢迎日志**:log 为空时打两条(新世界引导)。
-3. **移动端边缘滑动**:左缘(<32px)右滑 ≥64px 且横向占优 → 开图鉴;
+2. **关浮层即取消选中**:watch `ui.inspOpen`/`ui.recipeOpen`,两个都关闭时
+   `game.select(null)`——selected 高亮只用于指示检查器联动对象,不留死高亮。
+3. **挂载欢迎日志**:log 为空时打两条(新世界引导)。
+4. **移动端边缘滑动**:左缘(<32px)右滑 ≥64px 且横向占优 → 开图鉴;
    右缘左滑 → 开检查器。**起点落在 `[data-node-id]` 上不算边缘手势**(避免与节点拖拽冲突)。
-4. 渲染骨架:TopBar / views(世界常驻 + 背包分屏)/ StatusBar + 浮层。
+5. 渲染骨架:TopBar / views(世界常驻 + 背包分屏)/ StatusBar + 浮层。
 
 ### 模板结构
 
@@ -72,25 +74,35 @@ width:min(440px,94vw); max-height:76vh; z-index:60`,Transition `float`(透明度
 | `isViewToggle` | behavior?.kind === "view-toggle" |
 | `noChildren` | !!def.noChildren |
 | `benchRecipeName` | bench 专属:当前配方产物名 |
+| `autoTrigger` | 该节点 def 的 `auto-trigger` 行为(非自触发节点 null) |
+| `autoReady` / `autoSub` | 自触发节点是否已就位(父级类型经 `findNode` 查)/ 副标题文案("每 3 秒驱动" / "需挂在河流下面") |
 
 ### 点击分发 onRowClick()
 
 ```
-select(node.id)
-view-toggle → 按 behavior.view 调 ui.toggleCodex()/toggleBackpack() + fireFx,return
+view-toggle → 按 behavior.view 调 ui.toggleCodex()/toggleBackpack()
+              + emitTriggerFx(node.id, "ok"),return
 clickable = isFunctional || board==="world"
-clickable → game.clickNode(node.id) + fireFx()
-否则(背包里的普通节点)→ 仅选中
+clickable → game.clickNode(node.id)   ← 特效由 store 的触发结算点按结果广播
+否则(背包里的普通节点)→ 无反应
 ```
 
-`fireFx()`:先置 false 再 rAF 置 true,600ms 后复位——触发脉冲动画
-(row-pulse 背景 + icon-pop 图标弹跳;连点可重触发)。
+**点击不选中**:节点是可拖动的按钮,没有选中态(用户明确要求);
+`selectedId` 只由行尾「详情 / 选择配方」按钮设置,用于联动检查器——
+`.selected` 高亮只在这个意义上出现。
+
+**触发特效**:NodeItem 订阅 `triggerFxOf(node.id)`(game/fx.ts 事件总线,
+store 在每条触发结算路径广播 ok/fail)。watch 收到事件后复位→rAF→强制
+reflow(读行元素 offsetWidth)→置真,播放 CSS 动画(`.fx-ok` 一道该类型
+accent 色波左→右扫过 / `.fx-fail` 灰波),1350ms 后清类;连发(含动画刚
+结束的窗口)都能从头重播。组件卸载时 clearTriggerFx 清掉自己的条目。
 
 ### 行内元素(从左到右)
 
 twisty(无子/无 noChildren 时隐藏)→ NodeIcon → 名称(def.accent 着色)→
-副标题四选一(bench:配方·xx / explorer 探索中:倒计时秒 / view-toggle:已开启·已收起
-(带 PanelRight 图标,读 ui.backpackOpen)/ 普通节点:分类小标签)→
+副标题(bench:配方·xx / explorer 探索中:倒计时秒 / view-toggle:已开启·已收起
+(带 PanelRight 图标,读 ui.backpackOpen)/ auto-trigger:每 N 秒驱动(cyan)或
+需挂在河流下面(orange)/ 普通节点:分类小标签)→
 flex 填充 → ×N 徽标(isItemStack)或子数胶囊 → 行尾按钮(bench 专属 ⚙ 选择配方;
 通用 ⋯ 详情打开检查器)。
 
@@ -116,7 +128,7 @@ flex 填充 → ×N 徽标(isItemStack)或子数胶囊 → 行尾按钮(bench �
 ### 样式要点
 
 - `.row-main`:全宽、无边框、无垂直间隙、`user-select:none`、左 2px 透明边
-  (选中时染 accent)、悬停/按下高亮;触屏行高经 `@media (hover:none){:root{--row-h:40px}}` 放大。
+  (检查器联动时染 accent)、悬停/按下高亮;触屏行高经 `@media (hover:none){:root{--row-h:40px}}` 放大。
 - `.child-list`:缩进 18px + 左引导线;`.is-empty` 不画线(避免残留短竖线——历史 bug)。
 - `.stack-list > .node-wrap:nth-child(n+5){display:none}`(占位隐藏,保索引)。
 - 咬合区与投放提示文案("↳ 挂为子节点")只在 `.app.dragging` 下出现。
@@ -130,16 +142,18 @@ accent 是自定义节点材质/配色的入口。
 ## 5. CodexView.vue —— 图鉴(浮窗内容)
 
 - `groups` computed:NODE_DEFS 按 category 分组(插入序)。
-- `seen(def)`:功能节点恒 true;地形看 `game.discovered`;材料/工具看
-  `ownedMap>0 || hasType(game.nodes, id)`(背包有或世界摆过)。
+- `seen(def)`:常驻(`permanent`)节点恒 true;地形看 `game.discovered`;其余(材料/工具,
+  以及可合成出来的功能节点如水车)看 `ownedMap>0 || hasType(game.nodes, id)`(背包有或世界摆过)。
 - `zoneLabel(def)`:zones 长度 ≥2(全区域)不标;否则" · 仅世界/仅背包"。
-- 下半部分是 8 条上手指南(与当前玩法逐条核对过,改玩法时记得同步)。
+- 下半部分是 9 条上手指南(与当前玩法逐条核对过,改玩法时记得同步)。
 
 ## 6. Inspector.vue —— 检查器(右抽屉内容)
 
 - 数据源:`game.selectedNode`(世界→背包 DFS;v-if 分支多,注意 noChildren 文案分支)。
+  selectedId 由「详情 / 选择配方」按钮设置——点击行本身不选中(见 §3)。
 - `zone` computed:世界→背包→null;`inWorld`、`isPile`(nodeCount>1)。
 - 特殊面板:explorer(状态/已发现地形)、bench(当前配方 + 选择配方按钮)、
+  auto-trigger(驱动条件/驱动间隔/状态/驱动对象,如水车)、
   noChildren("这是一个开关节点,不能挂载子节点")。
 - 普通节点:子节点数、空手点击提示(findInteraction("hand", type)?.note)、
   子节点清单("点击它 = 依次触发")或空提示。
@@ -182,6 +196,7 @@ accent 是自定义节点材质/配色的入口。
   字体(--mono / --sans)、--radius / --shadow。
 - Element Plus 主色对齐:`--el-color-primary: var(--accent)` 等一组覆盖。
 - `.row-main/.slot/.draggable` 的 `user-select:none`(需求:拖动对象禁文字选中)。
-- 触发动画 keyframes:`row-pulse`(背景闪 accent-soft)、`icon-pop`(图标放大回弹)。
+- 触发特效 keyframes:`fx-ok`(accent 色波左→右扫过)、`fx-fail`(灰波);
+  事件源 game/fx.ts,详见 14 §5。
 - 拖拽反馈:`.sortable-ghost`(占位半透明)、`.sortable-fallback`(虚影,见 05 §2)。
 - 历史遗留清理:底部导航/物品栏样式已删;新增界面前先确认变量没有孤儿引用。

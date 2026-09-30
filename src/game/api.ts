@@ -16,16 +16,16 @@
  */
 import {
   DEF_MAP,
-  ICONS,
   INTERACTION_MAP,
   INTERACTIONS,
   NODE_DEFS,
   RECIPES,
 } from "./registry"
+import { ICONS } from "./icons"
 import type { Component } from "vue"
 import type { Interaction, NodeDef, Recipe } from "./types"
 
-/** 注册图标(lucide 组件),供 registerNode 的 icon 字段引用 */
+/** 注册图标组件(像素贴图直接放 src/assets/icons/ 即自动注册,无需本 API) */
 export function registerIcon(name: string, comp: Component): void {
   ICONS[name] = comp
 }

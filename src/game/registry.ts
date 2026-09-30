@@ -6,34 +6,8 @@
  * 所有集合都是 shallowReactive:运行时注册(push/索引赋值)会立刻
  * 反映到消费它们的 computed 与组件渲染里。
  */
-import { markRaw, shallowReactive, type Component } from "vue"
-import {
-  TreePine,
-  Waves,
-  Mountain,
-  Wand,
-  Logs,
-  Axe,
-  Hand,
-  Compass,
-  Soup,
-  Backpack,
-} from "lucide-vue-next"
+import { shallowReactive } from "vue"
 import type { Interaction, NodeDef, NodeZone, Recipe } from "./types"
-
-/** lucide 图标映射(自定义节点可通过 api.registerIcon 追加) */
-export const ICONS = shallowReactive<Record<string, Component>>({
-  forest: markRaw(TreePine),
-  river: markRaw(Waves),
-  stone: markRaw(Mountain),
-  stick: markRaw(Wand),
-  wood: markRaw(Logs),
-  stoneAxe: markRaw(Axe),
-  hand: markRaw(Hand),
-  explorer: markRaw(Compass),
-  bench: markRaw(Soup),
-  backpackNode: markRaw(Backpack),
-})
 
 /** 全部节点类型定义 */
 export const NODE_DEFS: NodeDef[] = shallowReactive([
@@ -78,6 +52,16 @@ export const NODE_DEFS: NodeDef[] = shallowReactive([
     accent: "#8672bd",
     desc: "把材料节点挂到它下面,点击它就会按当前配方合成,产物自动进背包。它天然生成在背包里,方便整堆挂料、批量合成。",
     behavior: { kind: "craft" },
+  },
+  {
+    id: "waterwheel",
+    name: "水车",
+    category: "functional",
+    icon: "waterwheel",
+    maxStack: 1,
+    accent: "#9c7b4a",
+    desc: "把它放到河流下面,水流会每 3 秒推动它一次,驱动挂在它下面的节点——比如石斧。石斧下面再挂上森林,木头就会源源不断地流进背包。",
+    behavior: { kind: "auto-trigger", intervalMs: 3000, poweredBy: "river" },
   },
   {
     id: "forest",
@@ -255,6 +239,15 @@ export const RECIPES: Recipe[] = shallowReactive([
       { type: "stick", count: 2 },
     ],
     output: { type: "stoneAxe", count: 1 },
+  },
+  {
+    id: "water-wheel",
+    category: "木工",
+    inputs: [
+      { type: "wood", count: 4 },
+      { type: "stick", count: 2 },
+    ],
+    output: { type: "waterwheel", count: 1 },
   },
 ])
 

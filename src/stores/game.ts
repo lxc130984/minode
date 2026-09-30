@@ -47,9 +47,10 @@ function stackRootOf(roots: GameNode[], node: GameNode): GameNode {
 function canAbsorb(pile: GameNode, whole: GameNode): boolean {
   return nodeCount(pile) + nodeCount(whole) <= stackLimit(pile.type)
 }
-import type { GameNode, LogEntry, LogKind } from "../game/types"
+import type { AutoTriggerBehavior, GameNode, LogEntry, LogKind } from "../game/types"
 import { nodeCount } from "../game/types"
 import { countNodes, findNode, isAncestorOf, removeNode } from "../game/tree"
+import { clearAllTriggerFx, emitTriggerFx, type TriggerOutcome } from "../game/fx"
 
 const LOG_LIMIT = 200
 /** 存档结构版本:不匹配时自动开新档 */
@@ -62,6 +63,13 @@ export const SAVE_KEY = "game"
  * 每秒刷新但不算 store mutation,避免触发持久化插件的全量写盘。
  */
 export const gameNow = ref(Date.now())
+
+/**
+ * 自触发节点的下一次驱动时间(node id → 时间戳 ms)。
+ * 与 gameNow 同理放在 store 之外:每秒都可能变化,不该触发持久化写盘,
+ * 也不需要落盘(刷新/导入存档后重新计时)。
+ */
+const autoTriggerAt = new Map<string, number>()
 
 /** 节点面板(board)标识:世界、背包…… 未来可继续扩展同构面板 */
 export type BoardId = "world" | "backpack"
@@ -322,6 +330,7 @@ export const useGameStore = defineStore("game", {
     // ── 基础 ─────────────────────────────────────────────
     reset() {
       this.$patch(freshState())
+      clearAllTriggerFx() // 旧 id 的行已卸载,特效事件无人消费,全清
       this.pushLog("一个崭新的世界展开了。", "info")
       this.pushLog("点击「探索」节点寻找地形;点击「背包」节点开合背包分屏。", "info")
     },
@@ -334,6 +343,7 @@ export const useGameStore = defineStore("game", {
       if (this.exploring && gameNow.value >= this.exploreEndAt) {
         this.resolveExplore()
       }
+      this.tickAutoTriggers()
     },
 
     pushLog(text: string, kind: LogKind = "info") {
@@ -362,11 +372,24 @@ export const useGameStore = defineStore("game", {
       this.selectedId = id
     },
 
+    /** 点击入口:只触发,不选中——节点是可拖动的按钮,没有选中态;
+     *  selectedId 由「详情/选择配方」按钮设置,用于联动检查器。 */
     clickNode(id: string) {
       const hit = findNode(this.nodes, id) ?? findNode(this.backpack, id)
       if (!hit) return
-      this.selectedId = id
-      const node = hit.node
+      this.triggerNode(hit.node)
+    },
+
+    /**
+     * 触发一个节点:语义与"点击它"完全一致(自触发行为也走这里,
+     * 所以"被驱动"与"被点击"是同一条结算路径)。
+     * 行为节点按行为分发、不向子节点传导;普通节点有子则逐子触发(自身为来源),
+     * 叶子则空手触发。
+     * silent:自动驱动(水车等)用——只记产出,不刷风味/一无所获日志。
+     * 每条结算路径都会 emitTriggerFx 广播视觉反馈(成功变色/无效变灰),
+     * 静默驱动只压日志不压视觉。
+     */
+    triggerNode(node: GameNode, silent = false) {
       const behavior = getDef(node.type).behavior
 
       // 视图开关行为(如「背包」节点)由界面层处理,这里只选中
@@ -381,42 +404,113 @@ export const useGameStore = defineStore("game", {
         this.craftBench(node)
         return
       }
+      if (behavior?.kind === "auto-trigger") {
+        this.driveAutoTrigger(node, silent)
+        return
+      }
       if (behavior) return // 其余行为(如工厂)暂无点击语义,静默
 
       if (node.children.length > 0) {
-        // 点击父节点:以父节点为「点击来源」,依次触发每个子节点
+        // 触发父节点:点击落地即反馈,再以它为「来源」依次触发每个子节点——
+        // 子节点按交互结果各自反馈,视觉上就是沿树传播的瀑布流
+        emitTriggerFx(node.id, "ok")
         for (const child of node.children) {
-          this.trigger(node.type, child.type)
+          emitTriggerFx(child.id, this.trigger(node.type, child.type, silent))
         }
         return
       }
-      // 点击叶子节点:空手点击
-      this.trigger("hand", node.type)
+      // 触发叶子节点:空手,反馈取决于交互结果
+      emitTriggerFx(node.id, this.trigger("hand", node.type, silent))
     },
 
-    /** 解析并结算一次「来源 → 目标」交互 */
-    trigger(source: string, target: string) {
+    /**
+     * 驱动一个自触发节点:依次"触发"它的每个子节点
+     * (子节点按被点击的语义结算,如水车 → 石斧 → 森林)。
+     * 既用于到点自动驱动(silent),也用于玩家手动点击。
+     */
+    driveAutoTrigger(node: GameNode, silent = false) {
+      emitTriggerFx(node.id, "ok") // 被驱动本身即成功:转一圈的心跳脉冲
+      for (const child of node.children) {
+        this.triggerNode(child, silent)
+      }
+    },
+
+    /**
+     * 自触发节点的周期驱动(由 onClock 每秒调用):
+     * 已就位(直接挂在 poweredBy 指定类型下)的节点到点即驱动一次。
+     * 计时表在 store 外(同 gameNow:不落盘);后台节流造成的迟到只补一次,
+     * 不做离线补算;拖拽中整体跳过,避免与 Sortable 的落盘序列抢写。
+     */
+    tickAutoTriggers() {
+      if (this.dragging) return
+      const now = gameNow.value
+      const running = new Set<string>()
+      const due: GameNode[] = []
+      const walk = (ns: GameNode[], parent: GameNode | null) => {
+        for (const node of ns) {
+          const b = autoTriggerBehaviorOf(node)
+          if (b && autoTriggerReady(b, parent)) {
+            running.add(node.id)
+            const nextAt = autoTriggerAt.get(node.id)
+            if (nextAt == null) {
+              // 首次就位:记下第一拍,并告诉玩家它开始运转了
+              autoTriggerAt.set(node.id, now + b.intervalMs)
+              const source = b.poweredBy ? `被${getDef(b.poweredBy).name}推动` : "开始运转"
+              this.pushLog(
+                `「${getDef(node.type).name}」${source},每 ${Math.round(b.intervalMs / 1000)} 秒驱动一次。`,
+                "info",
+              )
+            } else if (now >= nextAt) {
+              autoTriggerAt.set(node.id, now + b.intervalMs)
+              due.push(node)
+            }
+          }
+          walk(node.children, node)
+        }
+      }
+      walk(this.nodes, null)
+      walk(this.backpack, null)
+      // 已被移走/失去动力的节点丢掉计时,重新就位时从零开始
+      for (const id of [...autoTriggerAt.keys()]) {
+        if (!running.has(id)) autoTriggerAt.delete(id)
+      }
+      // 遍历完再统一驱动:驱动会改树(产出入背包等),不边走边改
+      for (const node of due) {
+        this.driveAutoTrigger(node, true)
+      }
+    },
+
+    /**
+     * 解析并结算一次「来源 → 目标」交互(silent = 自动驱动的背景触发,不刷风味日志)。
+     * 返回触发结果供调用方广播视觉反馈:
+     * 查不到条目 = fail(无效);有条目 = ok——风味回应、实际产出、
+     * 或掷骰未中(交互本身有效,只是这次运气不好)都算成功。
+     */
+    trigger(source: string, target: string, silent = false): TriggerOutcome {
       const interaction = findInteraction(source, target)
       if (!interaction) {
-        this.pushLog(
-          `${getDef(source).name} 对 ${getDef(target).name} 似乎产生不了什么效果。`,
-          "warn",
-        )
-        return
+        if (!silent) {
+          this.pushLog(
+            `${getDef(source).name} 对 ${getDef(target).name} 似乎产生不了什么效果。`,
+            "warn",
+          )
+        }
+        return "fail"
       }
       if (interaction.results.length === 0) {
-        this.pushLog(interaction.note, "info")
-        return
+        if (!silent) this.pushLog(interaction.note, "info")
+        return "ok"
       }
       const drops = rollDrops(interaction)
       if (drops.length === 0) {
-        this.pushLog(`${interaction.note} 一无所获。`, "warn")
-        return
+        if (!silent) this.pushLog(`${interaction.note} 一无所获。`, "warn")
+        return "ok"
       }
       for (const drop of drops) {
         this.addItem(drop.type, drop.count)
       }
-      this.pushLog(interaction.note, "info")
+      if (!silent) this.pushLog(interaction.note, "info")
+      return "ok"
     },
 
     toggleCollapse(id: string) {
@@ -570,6 +664,7 @@ export const useGameStore = defineStore("game", {
     startExplore(node: GameNode) {
       if (this.exploring) {
         this.pushLog(`还在探索中……(约 ${this.exploreCdLeft} 秒)`, "warn")
+        emitTriggerFx(node.id, "fail")
         return
       }
       const b = exploreBehaviorOf(node)
@@ -577,6 +672,7 @@ export const useGameStore = defineStore("game", {
       this.exploringNodeId = node.id
       this.exploreEndAt = Date.now() + (b?.durationMs ?? 5000)
       this.pushLog("你向着未知出发……", "info")
+      emitTriggerFx(node.id, "ok")
     },
 
     /** 到点结算:有概率在发起探索的节点下生成地形 */
@@ -592,6 +688,7 @@ export const useGameStore = defineStore("game", {
       const b = exploreBehaviorOf(explorer)
       if (Math.random() >= (b?.successRate ?? 0.5)) {
         this.pushLog("这次探索一无所获。", "warn")
+        emitTriggerFx(explorer.id, "fail")
         return
       }
       const terrain = rollPool(b?.pool ?? [{ type: "forest", weight: 1 }])
@@ -600,6 +697,7 @@ export const useGameStore = defineStore("game", {
       explorer.collapsed = false // 有新发现,展开让玩家看见
       if (!this.discovered.includes(terrain)) this.discovered.push(terrain)
       this.pushLog(`探索成功!「${def.name}」出现在了探索节点之下。`, "gain")
+      emitTriggerFx(explorer.id, "ok")
     },
 
     // ── 手工合成(节点) ───────────────────────────────────
@@ -633,6 +731,7 @@ export const useGameStore = defineStore("game", {
           `材料不足:${missing.join("、")}。把材料节点挂到「手工合成」下面再试。`,
           "warn",
         )
+        emitTriggerFx(target.id, "fail")
         return
       }
       let unsatisfied = 0
@@ -642,6 +741,7 @@ export const useGameStore = defineStore("game", {
       if (unsatisfied > 0) {
         // 计数与移除口径不一致的防御:不应发生
         this.pushLog("合成材料出现异常,已中止。", "warn")
+        emitTriggerFx(target.id, "fail")
         return
       }
       this.addItem(recipe.output.type, recipe.output.count, true)
@@ -651,6 +751,7 @@ export const useGameStore = defineStore("game", {
           .join(" + ")} → ${getDef(recipe.output.type).name}×${recipe.output.count}`,
         "craft",
       )
+      emitTriggerFx(target.id, "ok")
     },
 
     // ── 拖拽辅助 ─────────────────────────────────────────
@@ -770,6 +871,7 @@ export const useGameStore = defineStore("game", {
       }
       if (!isSaveValid(data)) return false
       const s = data as Record<string, unknown>
+      clearAllTriggerFx()
       this.$patch({
         nodes: s.nodes as GameNode[],
         backpack: s.backpack as GameNode[],
@@ -813,4 +915,18 @@ export const useGameStore = defineStore("game", {
 function exploreBehaviorOf(node: GameNode) {
   const b = getDef(node.type).behavior
   return b?.kind === "explore" ? b : null
+}
+
+/** 取节点自身定义声明的自触发行为(非自触发节点返回 null) */
+export function autoTriggerBehaviorOf(node: GameNode): AutoTriggerBehavior | null {
+  const b = getDef(node.type).behavior
+  return b?.kind === "auto-trigger" ? b : null
+}
+
+/**
+ * 自触发节点是否已就位:直接挂在 poweredBy 指定的类型下(缺省 = 恒就位)。
+ * 驱动判定与界面状态显示共用这一处,避免两处口径漂移。
+ */
+export function autoTriggerReady(b: AutoTriggerBehavior, parent: GameNode | null): boolean {
+  return !b.poweredBy || parent?.type === b.poweredBy
 }

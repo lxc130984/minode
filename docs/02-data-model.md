@@ -90,7 +90,7 @@ export interface NodeDef {
 | `id` | string | 全局 | 类型标识;GameNode.type 指向它 |
 | `name` | string | 全部 UI | 显示名 |
 | `category` | `"terrain" \| "resource" \| "tool" \| "functional"` | 图鉴分组、行内分类小标签 | 分类体系(词汇表见 12)。注意:不是行为判定依据,行为看 `behavior` |
-| `icon` | string | NodeIcon | registry.ICONS 的键 |
+| `icon` | string | NodeIcon | 图标键(game/icons.ts 的 ICONS):像素贴图 = assets/icons/ 下的文件名;lucide 线条图标 = 显式表键 |
 | `desc` | string | 图鉴、检查器 | 描述文本 |
 | `accent` | string(css color) | NodeIcon/NodeItem | 视觉主色:图标+名称着色。**自定义节点材质的入口** |
 | `worldOnly` | boolean | `zonesOf()` | 仅世界。等价于 `zones: ["world"]`,是它的简写 |
@@ -123,15 +123,22 @@ export type NodeBehavior =
   | ViewToggleBehavior
 ```
 
-| 行为 | 定义 | 点击时(store.clickNode) | 点击时(界面层 NodeItem) |
+| 行为 | 定义 | 触发时(store.triggerNode) | 点击时(界面层 NodeItem) |
 |---|---|---|---|
-| `explore` | `{ kind, durationMs, successRate, pool: {type, weight}[] }` | `startExplore(node)`——参数从**被点节点自身**的 def 读取 | 任何面板都触发 + fx 动画 |
-| `craft` | `{ kind }` | `craftBench(node)`——以被点节点为合成台 | 同上;行尾显示 ⚙ 配方按钮 |
+| `explore` | `{ kind, durationMs, successRate, pool: {type, weight}[] }` | `startExplore(node)`——参数从**被触发节点自身**的 def 读取 | 任何面板都触发 + fx 动画 |
+| `craft` | `{ kind }` | `craftBench(node)`——以被触发节点为合成台 | 同上;行尾显示 ⚙ 配方按钮 |
 | `factory` | `{ kind, inputs, outputs, intervalMs }` | 静默 return(暂无语义) | — |
-| `view-toggle` | `{ kind, view: "backpack" \| "codex" }` | **只选中,不分发**(界面层处理) | 按 `behavior.view` 调 ui.toggleBackpack/toggleCodex |
+| `auto-trigger` | `{ kind, intervalMs, poweredBy? }` | `driveAutoTrigger(node)`——依次触发自身每个子节点(手动 "转一圈") | 同上;行内显示就位状态副标题 |
+| `view-toggle` | `{ kind, view: "backpack" \| "codex" }` | **不分发**(界面层处理) | 按 `behavior.view` 调 ui.toggleBackpack/toggleCodex |
 
-设计意图:**新增一种行为 = 扩联合类型 + clickNode 加一个分发分支**,不需要碰组件
-(组件只看"有没有 behavior"和"是不是 view-toggle")。
+`auto-trigger` 还有第二条(时钟)路径:`onClock → tickAutoTriggers()` 每拍检查一次,
+**已就位**(直接挂在 `poweredBy` 指定的类型下,如水车挂在河流下)的节点每 `intervalMs`
+驱动一次;自动驱动复用同一条 `triggerNode` 路径(带 `silent`:只记产出、不刷风味日志),
+计时表在 store 之外且不落盘(见 04 §1.4)。两条路径语义一致:**被驱动 ≡ 被点击**。
+
+设计意图:**新增一种行为 = 扩联合类型 + `triggerNode` 加一个分发分支**,不需要碰组件
+(组件只看"有没有 behavior"和"是不是 view-toggle")。点击与时钟驱动共用 `triggerNode`,
+任何"触发一个节点"的新入口都应当走它,避免出现第二套分发口径。
 探索/合成的"按发起节点结算"是硬性要求(历史上曾回落到全局单例 benchNode,
 导致第二台合成台错乱,见 11-pitfalls §8)。
 

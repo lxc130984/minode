@@ -27,4 +27,4 @@
 - 本地开发:`npm install && npm run dev`(http://localhost:1420)
 - 构建:`npm run build`(= vue-tsc 类型检查 + vite 产出,CI 同款)
 - 桌面端:`npm run tauri dev`(Tauri 壳,网页逻辑完全一致)
-- 代码规模:约 3100 行(src/ 下),无单元测试框架,验证靠构建 + 浏览器手测/自动化
+- 代码规模:约 3700 行(src/ 下),无单元测试框架,验证靠构建 + 浏览器手测/自动化

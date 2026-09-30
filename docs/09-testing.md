@@ -37,6 +37,10 @@ __game.canDropIntoChildList({ dataset:{ntype:"wood",nodeId:"n98",zone:"backpack"
 
 - 动作测试:`addItem/placeItem/nodeToItem/craftBench/startExplore`(探索结算:
   `__game.exploreEndAt = 0; __game.onClock()` 跳过冷却)。
+- **触发特效测试**:点击后 200~400ms(动画中)读行元素类名断言
+  `fx-ok` / `fx-fail`(如石斧挂探索:石斧行 fx-ok、探索行 fx-fail);
+  1.5s 后类应清除。注意:点击行**不再产生 selected 类**(选中只来自详情按钮);
+  页面必须前台可见(fx 类应用在 rAF 里,后台标签页不派帧)。
 
 ## 3. ⚠️ 三大假故障(先排除再怀疑代码)
 
@@ -122,6 +126,19 @@ const f = g.explorerNode.children.find(c=>c.type==="forest")
 axe.children.push(f)
 g.explorerNode.children = g.explorerNode.children.filter(c=>c.id!==f.id)
 g.clickNode(axe.id)   // → 获得木头
+```
+
+自触发(水车)最省事的验证:**别手动 `onClock()`,就用真实 1s 心跳观察**
+```js
+let g = __game
+const find = (ns, t) => { for (const n of ns) { if (n.type === t) return n; const h = find(n.children, t); if (h) return h } }
+g.addItem("waterwheel"); g.placeItem(g.backpack.find(n => n.type === "waterwheel").id)
+const wheel = find(g.nodes, "waterwheel")          // 放到世界后:摘出根、挂进河流下
+const river = find(g.nodes, "river")
+g.nodes.splice(g.nodes.indexOf(wheel), 1); river.children.push(wheel)
+// 再把石斧挂到水车下、森林挂到石斧下;等 3~4 秒:
+// countItem("wood") +1、日志只多一条"获得 木头 ×1"(自动驱动不打风味日志);
+// 把 wheel 移回世界根 → 转 4 秒应 0 产出(失去动力)
 ```
 
 守卫四场景(容量):

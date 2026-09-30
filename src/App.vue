@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue"
+import { onMounted, ref, watch } from "vue"
 import { useIntervalFn } from "@vueuse/core"
 import { X } from "lucide-vue-next"
 import TopBar from "./components/TopBar.vue"
@@ -27,6 +27,15 @@ onMounted(() => {
     game.pushLog("点击「探索」节点寻找地形;点击「背包」节点开合背包分屏。", "info")
   }
 })
+
+// 检查器/配方浮层关闭即取消选中——点击行本身不选中(节点即按钮),
+// selected 高亮只在浮层开着、用于指示联动对象时才有意义,别留死高亮
+watch(
+  () => [ui.inspOpen, ui.recipeOpen] as const,
+  ([insp, recipe]) => {
+    if (!insp && !recipe) game.select(null)
+  },
+)
 
 // ── 移动端边缘滑动:左缘右滑开图鉴浮窗,右缘左滑开检查器 ────
 // 起点落在可拖拽表面上时不视为边缘手势,避免与节点拖拽冲突

@@ -64,16 +64,18 @@ export type NodeBehavior = … | FurnaceBehavior
   zones: ["world","backpack"], permanent: true,
   behavior: { kind: "furnace", heatPerTick: 2 }, desc: "…" }
 
-// ③ store.clickNode 加分发分支(参数永远取自被点节点自身!)
+// ③ store.triggerNode 加分发分支(参数永远取自被触发节点自身!)
 if (behavior?.kind === "furnace") { this.tickFurnace(node); return }
 if (behavior) return   // 未知行为静默
 
-// ④ (可选)周期逻辑挂 onClock():遍历相关节点结算
+// ④ (可选)周期逻辑挂 onClock();自触发类行为的现成实现见 tickAutoTriggers()
 ```
 
 已有行为可直接复用:
 - `explore`:点击定时概率产地形(参数 durationMs/successRate/pool);
 - `craft`:子级材料按配方合成;
+- `auto-trigger`:就位(直接挂在 `poweredBy` 指定的父类型下)后被周期驱动,
+  每次驱动依次触发自身每个子节点(intervalMs;水车用它 —— 河流 → 水车 → 石斧 → 森林);
 - `view-toggle`:点击开合界面(view: "backpack"|"codex";界面层 NodeItem 分发)。
 
 **反模式(历史 bug)**:行为实现里读全局单例(如 `this.benchNode`)而不接收
@@ -81,15 +83,36 @@ if (behavior) return   // 未知行为静默
 
 ## 5. 加图标
 
+### 5.1 像素贴图(推荐,零代码)
+
+把图片直接丢进 `src/assets/icons/`,**文件名(去扩展名)就是图标键**,
+构建期自动注册(game/icons.ts 的 import.meta.glob):
+
+```
+src/assets/icons/charcoal.png  →  def 里 icon: "charcoal"
+```
+
+- 同名贴图**覆盖** lucide 同名图标——逐个换成像素风时,放文件就够了;
+- 支持 png / webp / gif / svg / jpg;渲染为 `<img class="px-icon">`
+  (main.css 里 `image-rendering: pixelated`,按 size prop 缩放)。
+
+### 5.2 lucide 线条图标
+
 ```ts
 import { Flame } from "lucide-vue-next"
-// registry.ts → ICONS 追加(或运行时 api.registerIcon)
-ICONS.flame = markRaw(Flame)
+// src/game/icons.ts → LUCIDE_ICONS 对象字面量里加一行
+flame: markRaw(Flame),
 ```
 
 ⚠️ lucide-vue-next 的图标名会随版本变化(如 `MoreVertical→EllipsisVertical`)。
 拿不准就 grep:
 `grep "declare const <Name>:" node_modules/lucide-vue-next/dist/lucide-vue-next.d.ts`
+
+### 5.3 运行时注册(试玩用,刷新即失)
+
+```js
+minode.registerIcon("flame", Flame)   // 或任意接受 { size } 的组件
+```
 
 ## 6. 运行时扩展 API(src/game/api.ts)
 

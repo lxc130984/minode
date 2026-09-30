@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue"
-import { ICONS, getDef } from "../game/registry"
+import { ICONS } from "../game/icons"
+import { getDef } from "../game/registry"
 
 const props = defineProps<{ type: string; size?: number }>()
 const comp = computed(() => ICONS[getDef(props.type).icon] ?? ICONS.hand)

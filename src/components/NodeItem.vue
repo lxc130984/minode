@@ -1,21 +1,21 @@
 <script setup lang="ts">
-import { computed, ref } from "vue"
+import { computed, onUnmounted, ref, watch } from "vue"
 import { VueDraggable } from "vue-draggable-plus"
 import { ChevronRight, Settings2, Ellipsis, PanelRightOpen, PanelRightClose } from "lucide-vue-next"
+import { clearTriggerFx, emitTriggerFx, triggerFxOf } from "../game/fx"
 import { DND_COMMON, onTreeAdd, setDragging, treeGroup } from "../game/dnd"
 import { getDef, getRecipe } from "../game/registry"
 import type { GameNode } from "../game/types"
 import { CATEGORY_LABELS, isStack, nodeCount } from "../game/types"
+import { findNode } from "../game/tree"
 import type { BoardId } from "../stores/game"
-import { useGameStore } from "../stores/game"
+import { autoTriggerBehaviorOf, autoTriggerReady, useGameStore } from "../stores/game"
 import { useUiStore } from "../stores/ui"
 import NodeIcon from "./NodeIcon.vue"
 
 const props = defineProps<{ node: GameNode; board: BoardId; depth: number }>()
 const game = useGameStore()
 const ui = useUiStore()
-
-const fx = ref(false)
 
 const def = computed(() => getDef(props.node.type))
 const selected = computed(() => game.selectedId === props.node.id)
@@ -45,29 +45,66 @@ const benchRecipeName = computed(() => {
   return r ? getDef(r.output.type).name : "未选择"
 })
 
-function fireFx() {
-  fx.value = false
-  requestAnimationFrame(() => {
-    fx.value = true
-    setTimeout(() => (fx.value = false), 600)
-  })
-}
+/** 自触发节点(水车等):挂在 poweredBy(河流)下面才被驱动 */
+const autoTrigger = computed(() => autoTriggerBehaviorOf(props.node))
+const autoReady = computed(() => {
+  const b = autoTrigger.value
+  if (!b) return false
+  const parent = findNode(game.boardRoots(props.board), props.node.id)?.parent ?? null
+  return autoTriggerReady(b, parent)
+})
+const autoSub = computed(() => {
+  const b = autoTrigger.value
+  if (!b) return null
+  if (autoReady.value) return `每 ${Math.round(b.intervalMs / 1000)} 秒驱动`
+  return b.poweredBy ? `需挂在${getDef(b.poweredBy).name}下面` : "待就位"
+})
+
+/**
+ * 触发特效:订阅本节点在事件总线上的条目,成功一道主色波左→右扫过、无效灰波。
+ * 事件由 store 的触发结算点广播(点击/自动驱动同源),本组件只负责播放。
+ * 复位→下一帧置真 + 强制 reflow(offsetWidth),保证连发(含动画刚结束的
+ * 窗口)时 CSS 动画都能从头重播——rAF 早于样式重算,不强制 reflow 的话
+ * 浏览器可能从未观察到"类已移除",动画不会重启。
+ */
+const FX_HOLD_MS = 1350 // 略长于 1.2s 动画,收尾清除类
+const fxState = ref<"ok" | "fail" | null>(null)
+const rowEl = ref<HTMLElement | null>(null)
+let fxTimer: ReturnType<typeof setTimeout> | undefined
+watch(
+  () => triggerFxOf(props.node.id),
+  (ev) => {
+    if (!ev) return
+    fxState.value = null
+    requestAnimationFrame(() => {
+      void rowEl.value?.offsetWidth
+      fxState.value = ev.outcome
+      clearTimeout(fxTimer)
+      fxTimer = setTimeout(() => (fxState.value = null), FX_HOLD_MS)
+    })
+  },
+)
+onUnmounted(() => {
+  clearTimeout(fxTimer)
+  clearTriggerFx(props.node.id)
+})
 
 /** 点击:视图开关节点切换分屏;功能节点(按 behavior 分发)任何面板都触发;
- *  普通节点只在"世界"里触发(父触发子/空手),背包里仅选中。 */
+ *  普通节点只在"世界"里触发(父触发子/空手),背包里无反应。
+ *  点击不再选中节点——节点是可拖动的按钮,不需要选中态;
+ *  selectedId 只由「详情/选择配方」按钮设置,用于联动检查器。 */
 function onRowClick() {
-  game.select(props.node.id)
   if (isViewToggle.value) {
     const view = def.value.behavior?.kind === "view-toggle" ? def.value.behavior.view : "backpack"
     if (view === "codex") ui.toggleCodex()
     else ui.toggleBackpack()
-    fireFx()
+    emitTriggerFx(props.node.id, "ok") // 开关成功即反馈
     return
   }
   const clickable = isFunctional.value || props.board === "world"
   if (clickable) {
+    // 特效由 store 的触发结算点按结果广播(成功变色/无效变灰)
     game.clickNode(props.node.id)
-    fireFx()
   }
 }
 
@@ -90,8 +127,15 @@ function openRecipe() {
     :data-zone="board === 'world' ? 'tree' : 'backpack'"
   >
     <div
+      ref="rowEl"
       class="row-main"
-      :class="{ selected, 'trigger-fx': fx, functional: isFunctional, 'view-toggle': isViewToggle }"
+      :class="{
+        selected,
+        'fx-ok': fxState === 'ok',
+        'fx-fail': fxState === 'fail',
+        functional: isFunctional,
+        'view-toggle': isViewToggle,
+      }"
       :style="def.accent ? { '--node-accent': def.accent } : undefined"
       @click="onRowClick"
     >
@@ -118,6 +162,9 @@ function openRecipe() {
       </span>
       <span v-else-if="!isFunctional" class="nt-cat" :class="`cat-${def.category}`">
         {{ catLabel }}
+      </span>
+      <span v-if="autoSub" class="nt-sub auto-state" :class="{ ready: autoReady, need: !autoReady }">
+        {{ autoSub }}
       </span>
       <span class="nt-fill" />
       <span v-if="isItemStack" class="nt-pile mono">×{{ stackTotal }}</span>
@@ -250,6 +297,15 @@ function openRecipe() {
 }
 .nt-sub.view-state.open {
   color: var(--accent);
+}
+.nt-sub.auto-state {
+  color: var(--fg-faint);
+}
+.nt-sub.auto-state.ready {
+  color: var(--cyan);
+}
+.nt-sub.auto-state.need {
+  color: var(--orange);
 }
 .nt-cat {
   font-size: 10px;

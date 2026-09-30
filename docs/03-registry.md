@@ -1,22 +1,23 @@
 # 03 · 内容注册表(src/game/registry.ts)
 
-> 游戏的全部"内容"集中在这一个文件:节点类型、图标、交互规则、配方。
+> 游戏的"内容"集中在这里:节点类型、交互规则、合成配方。
 > **加内容 = 只改这里(或运行时经 game/api.ts 注册),引擎与界面自动生效。**
+> (图标系统在 `src/game/icons.ts`,见 §1。)
 
 ## 0. 总原则:shallowReactive
 
 ```ts
-import { markRaw, shallowReactive } from "vue"
+import { shallowReactive } from "vue"
 ```
 
 所有集合都是 `shallowReactive(...)`:
 
 | 集合 | 类型 |
 |---|---|
-| `ICONS` | `shallowReactive<Record<string, Component>>` |
 | `NODE_DEFS` / `DEF_MAP` | `shallowReactive` 数组/记录 |
 | `INTERACTIONS` / `INTERACTION_MAP` | 同上 |
 | `RECIPES` | 同上 |
+| `ICONS`(在 game/icons.ts) | `shallowReactive<Record<string, Component>>` |
 
 为什么:运行时注册(api.registerNode 等)做的是 push/索引赋值;
 **普通(非响应式)集合不会触发**图鉴分组(CodexView 的 computed)、配方列表、
@@ -26,32 +27,35 @@ shallowReactive 让第一层变更(增删改条目)立即触发依赖。
 
 ⚠️ 新增集合时同样必须包 shallowReactive;`deep` 不需要(条目内部字段视为不可变)。
 
-## 1. ICONS —— 图标映射
+## 1. 图标映射(在 src/game/icons.ts,不在此文件)
 
 ```ts
-export const ICONS = shallowReactive<Record<string, Component>>({
-  forest: markRaw(TreePine), river: markRaw(Waves), stone: markRaw(Mountain),
-  stick: markRaw(Wand), wood: markRaw(Logs), stoneAxe: markRaw(Axe),
-  hand: markRaw(Hand), explorer: markRaw(Compass), bench: markRaw(Soup),
-  backpackNode: markRaw(Backpack),
-})
+// game/icons.ts:两种来源汇成一张 ICONS 表(键 = NodeDef.icon 的值)
+// ① 像素贴图(自动):把图片丢进 src/assets/icons/ 即注册,键 = 文件名(去扩展名)
+const ASSET_FILES = import.meta.glob("../assets/icons/*.{png,webp,gif,svg,jpg}",
+  { eager: true, query: "?url", import: "default" })
+// ② lucide 线条图标(显式):LUCIDE_ICONS 表;不能 glob 整个包(上千图标全进产物)
+export const ICONS = shallowReactive({ ...LUCIDE_ICONS, ...贴图组件 })
 ```
 
-- 键 = NodeDef.icon 的值;值 = lucide-vue-next 组件。
-- 运行时追加:`api.registerIcon(name, comp)`。
+- **同名时贴图覆盖 lucide**——逐个换成像素风时,放同名文件就够了。
+- 贴图组件 = `<img class="px-icon">`(main.css 里 `image-rendering: pixelated`),
+  接受与其他图标一致的 `{ size }` prop。
+- 运行时追加/覆盖:`api.registerIcon(name, comp)`(写 ICONS,刷新即失)。
 - 兜底:NodeIcon 里 `ICONS[icon] ?? ICONS.hand`。
 - 图标改名坑:lucide 新版本会改名(如 `HelpCircle→无`、`MoreVertical→EllipsisVertical`),
   引用前先 grep `node_modules/lucide-vue-next/dist/lucide-vue-next.d.ts` 确认存在。
 
 ## 2. NODE_DEFS / DEF_MAP / getDef
 
-### 2.1 当前 8 个内置定义(逐个)
+### 2.1 当前 9 个内置定义(逐个)
 
 | id | category | 关键 flag | behavior | 说明 |
 |---|---|---|---|---|
 | `explorer` 探索 | functional | worldOnly, permanent, accent #d08a3e | `{explore, durationMs:5000, successRate:0.65, pool:[forest .65, river .35]}` | 世界自带;点击探索 |
 | `backpackNode` 背包 | functional | worldOnly, permanent, **noChildren**, accent #b98a2f | `{view-toggle, view:"backpack"}` | 世界自带;点击开合背包分屏 |
 | `bench` 手工合成 | functional | permanent, **zones:["backpack"]**, accent #8672bd | `{craft}` | 背包自带;**只能在背包** |
+| `waterwheel` 水车 | functional | **maxStack:1**, accent #9c7b4a | `{auto-trigger, intervalMs:3000, poweredBy:"river"}` | 直接挂在河流下即就位,每 3 秒驱动其子节点 |
 | `forest` 森林 | terrain | worldOnly, accent #3d8b57 | — | 空手翻找得木棍/石子;被石斧砍得木头 |
 | `river` 河流 | terrain | worldOnly, accent #2f8f96 | — | 空手捡石子 |
 | `stick` 木棍 | resource(实际 material) | **maxStack:64** | — | 材料 |
@@ -128,6 +132,9 @@ export function getDef(type: string): NodeDef {
 { id: "stone-axe", category: "石器",
   inputs: [{type:"stone",count:3},{type:"stick",count:2}],
   output: {type:"stoneAxe",count:1} }
+{ id: "water-wheel", category: "木工",
+  inputs: [{type:"wood",count:4},{type:"stick",count:2}],
+  output: {type:"waterwheel",count:1} }
 ```
 
 ## 5. 概率工具

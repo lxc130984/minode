@@ -49,12 +49,15 @@ minode 是一个"点击 + 增量 + 文字冒险"网页游戏:**一切游玩元�
 | 森林 / 河流 | 地形,世界限定,探索产出 |
 | 木棍 / 石子 / 木头 | 材料,maxStack=64 |
 | 石斧 | 工具,maxStack=1(不可堆叠) |
-| 配方 | 3 石子 + 2 木棍 → 石斧(类别"石器") |
+| 水车 | 功能节点,maxStack=1;直接挂在河流下面即就位,每 3 秒"驱动"一次自己的子节点(如石斧) |
+| 配方 | 3 石子 + 2 木棍 → 石斧(类别"石器");4 木头 + 2 木棍 → 水车(类别"木工") |
 
 一条完整的开局流程:
 探索节点 → 出森林 → 空手点森林攒材料(自动堆进背包)→ 点背包节点开分屏 →
 把石子堆/木棍堆整堆拖到手工合成下 → 点手工合成得石斧 →
-把石斧拖到世界(放 1 个)→ 把森林拖到石斧下面 → 点石斧砍柴得木头。
+把石斧拖到世界(放 1 个)→ 把森林拖到石斧下面 → 点石斧砍柴得木头 →
+攒 4 木头 + 2 木棍合成水车 → 水车拖到河流下面、石斧挂到水车下面 →
+水流每 3 秒自动驱动石斧,木头自动进背包。
 
 ## 4. 技术栈与依赖
 
@@ -63,7 +66,7 @@ minode 是一个"点击 + 增量 + 文字冒险"网页游戏:**一切游玩元�
 | Vue 3(`<script setup>` + TS) | UI | 全部 SFC,无 JSX |
 | Pinia + pinia-plugin-persistedstate | 状态 + localStorage 存档 | persist.pick 白名单 |
 | Element Plus | 对话框/抽屉/下拉/消息 | 中文 locale;浅色主题下对齐了主色 |
-| lucide-vue-next | 图标 | 经 registry.ICONS 间接引用 |
+| lucide-vue-next | 图标 | 经 game/icons.ts 的 ICONS 间接引用 |
 | sortablejs + vue-draggable-plus | 拖拽 | **注意用的是 vue-draggable-plus 内嵌的 Sortable 构建**,与独立版行为有差异(见 05-dnd §6) |
 | @vueuse/core | useIntervalFn / useMediaQuery 等 | |
 | Vite 8 | 构建 | `base: "/minode/"` 为 Pages 配置 |
@@ -79,20 +82,22 @@ minode/
 │  ├─ main.ts              # 启动顺序:ensureSaveIntegrity → pinia(+persist)→ EP → mount;DEV 暴露 window.__game / window.minode
 │  ├─ App.vue              # 布局壳 + 1s 游戏心跳 + 移动端边缘滑动 + 浮窗/抽屉/对话框
 │  ├─ game/                # 纯逻辑层(不 import 任何组件)
-│  │  ├─ types.ts   (158 行)  # 数据模型与类型 + nodeCount/isStack/CATEGORY_LABELS
-│  │  ├─ registry.ts (283 行) # 内容注册表(全部 shallowReactive)
+│  │  ├─ types.ts   (171 行)  # 数据模型与类型 + nodeCount/isStack/CATEGORY_LABELS
+│  │  ├─ icons.ts    (78 行)  # 图标注册中心:assets/icons/ 贴图自动注册 + lucide 显式表
+│  │  ├─ fx.ts       (51 行)  # 触发特效事件总线(store 广播 ok/fail,NodeItem 订阅)
+│  │  ├─ registry.ts (276 行) # 内容注册表(全部 shallowReactive)
 │  │  ├─ tree.ts     (64 行)  # 树纯函数
 │  │  ├─ dnd.ts      (89 行)  # 拖拽 group 工厂 + onTreeAdd + DND_COMMON
 │  │  └─ api.ts      (81 行)  # 运行时扩展 API
 │  ├─ stores/
-│  │  ├─ game.ts    (816 行)  # 主 store:状态/守卫/全部游戏动作/存档(最大的文件)
+│  │  ├─ game.ts    (932 行)  # 主 store:状态/守卫/全部游戏动作/存档(最大的文件)
 │  │  └─ ui.ts       (28 行)  # 界面开关(不持久化)
 │  ├─ components/
 │  │  ├─ NodeBoard.vue (127)  # 节点面板基本组件(world/backpack 共用)
-│  │  ├─ NodeItem.vue  (359)  # 递归行节点(渲染+拖拽+折叠+堆徽标+点击分发)
-│  │  ├─ NodeIcon.vue  (18)   # 图标(accent 着色)
-│  │  ├─ CodexView.vue (171)  # 图鉴(分组)+ 上手指南
-│  │  ├─ Inspector.vue (341)  # 检查器抽屉(选中节点详情+操作)
+│  │  ├─ NodeItem.vue  (415)  # 递归行节点(渲染+拖拽+折叠+堆徽标+点击分发+触发特效)
+│  │  ├─ NodeIcon.vue  (19)   # 图标(accent 着色;ICONS 见 game/icons.ts)
+│  │  ├─ CodexView.vue (172)  # 图鉴(分组)+ 上手指南
+│  │  ├─ Inspector.vue  (372)  # 检查器抽屉(选中节点详情+操作)
 │  │  ├─ RecipeDialog.vue(161)# 配方选择(按 category 分组)
 │  │  ├─ LogConsole.vue (97)  # 日志面板
 │  │  ├─ TopBar.vue    (166)  # 品牌+图鉴开关+菜单(导出/导入/重置)

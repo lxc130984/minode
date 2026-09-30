@@ -63,11 +63,13 @@
   persist.pick ↔ exportSaveData ↔ applySaveData。
 - **违反后果**:坏档崩首帧且每次刷新复现(死循环);导出/导入丢字段。
 
-## I-10 registry 集合必须 shallowReactive;gameNow 时钟在 store 外
+## I-10 registry 集合必须 shallowReactive;瞬态状态(gameNow / 自触发计时 / 触发特效)在 store 外
 
-- **位置**:registry 全部集合;`gameNow` 模块级 ref。
+- **位置**:registry 全部集合;`gameNow` 模块级 ref;`autoTriggerAt` 模块级 Map(不落盘);
+  game/fx.ts 的触发特效事件 Map(不落盘,行卸载时清条目)。
 - **违反后果**:运行时注册后图鉴/配方"看似没生效"(00f308e 修复);
-  每秒全量序列化写盘(移动端卡顿)。
+  每秒全量序列化写盘(移动端卡顿);计时表进 state = 每秒写盘 + 存档把挂机时长
+  折算成意外产出(重新就位应当从零开始计时);特效事件进 state = 每次点击全量写盘。
 
 ## I-11 settle 一律 setTimeout(0);渲染层对瞬态帧防御
 

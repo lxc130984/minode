@@ -10,7 +10,7 @@
 ```
 ┌─ 第 1 层:数据(每个节点类型一份) ────────────────────────────┐
 │  registry.ts → NodeDef                                        │
-│    icon:    "forest"     ← 图标键(指向 ICONS 映射)          │
+│    icon:    "forest"     ← 图标键(指向 game/icons.ts 的 ICONS)│
 │    accent:  "#3d8b57"    ← 该类型的视觉主色(css color)       │
 │    category:"terrain"    ← 间接决定分类小标签的颜色类          │
 └───────────────────────────────────────────────────────────────┘
@@ -20,7 +20,7 @@
 │                   :style="def.accent && {color: accent}">     │
 │  NodeItem.vue   : 行结构;名称 :style="accent";行 :style 绑    │
 │                   定 --node-accent CSS 变量;类绑定 selected/  │
-│                   functional/view-toggle/trigger-fx/cat-xxx   │
+│                   functional/view-toggle/fx-ok/fx-fail/cat-x  │
 └───────────────────────────────────────────────────────────────┘
                               ↓ 挂载
 ┌─ 第 3 层:表现(CSS) ─────────────────────────────────────────┐
@@ -42,21 +42,42 @@
 
 ## 2. 给节点/物品换图标
 
-### 2.1 方法一:改用已有图标(最快)
+> 图标系统在 `src/game/icons.ts`:像素贴图**自动注册**(丢文件即生效),
+> lucide 线条图标显式声明,同名时贴图覆盖 lucide。
+> 消费端(NodeIcon)只认 `ICONS[键]`,不关心来源。
+
+### 2.1 方法一:像素贴图(推荐,零代码)
+
+把图片直接丢进 `src/assets/icons/`,文件名(去扩展名)就是图标键:
+
+```
+src/assets/icons/charcoal.png  →  def 里 icon: "charcoal"
+```
+
+- 支持 png / webp / gif / svg / jpg,构建期 import.meta.glob 自动注册;
+- 文件名即键的语义:只剥**最后一个**扩展名(`wood.v2.png` → 键 `wood.v2`);
+  大小写敏感;同名不同扩展(`wood.png` + `wood.svg`)按字母序后者覆盖前者;
+- 渲染为 `<img class="px-icon">`(main.css:`image-rendering: pixelated`,
+  按 size prop 缩放)——**不吃 accent 着色**(位图没有 currentColor);
+- **同名覆盖 lucide**:想替掉某个线框图标,放一张同名贴图即可,
+  逐个迁移像素风不用改任何代码。
+
+### 2.2 方法二:改用已有图标(最快)
 
 ```ts
 // registry.ts → NODE_DEFS 里对应 def
-{ id: "wood", icon: "logs" → 改成 ICONS 里已有的任何键,如 "stick" }
+{ id: "wood", icon: "wood" → 改成 ICONS 里已有的任何键,如 "stick" }
 ```
-可用键 = ICONS 的键名(forest / river / stone / stick / wood / stoneAxe /
-hand / explorer / bench / backpackNode)。
+可用键 = ICONS 的键名(lucide:forest / river / stone / stick / stoneAxe /
+hand / explorer / bench / backpackNode / waterwheel;贴图:assets/icons/ 下的文件名)。
 
-### 2.2 方法二:注册一个新 lucide 图标(常规)
+### 2.3 方法三:注册一个新 lucide 图标
 
 ```ts
-// registry.ts 顶部 import,再进 ICONS:
+// src/game/icons.ts:顶部 import,再进 LUCIDE_ICONS 对象字面量
 import { Flame } from "lucide-vue-next"
-ICONS.flame = markRaw(Flame)      // shallowReactive 对象,可直接索引赋值
+// …
+flame: markRaw(Flame),
 // 然后 def.icon: "flame"
 ```
 
@@ -70,28 +91,28 @@ grep "declare const Flame:" node_modules/lucide-vue-next/dist/lucide-vue-next.d.
 
 ⚠️ 必须 `markRaw()` 包裹——否则 Vue 会代理组件对象(性能 + 潜在告警)。
 
-### 2.3 方法三:任意 SVG(突破 lucide 限制)
+### 2.4 方法四:任意 SVG 组件(突破 lucide 限制)
 
-lucide 的组件就是渲染 `<svg>` 的函数组件,自定义 SVG 包装成同样接口即可:
+lucide 的组件就是渲染 `<svg>` 的函数组件,自定义 SVG 包装成同样接口
+(接受 `{ size }` 返回 svg)后,运行时挂进 ICONS 或在 icons.ts 里注册:
 
 ```tsx
-// 任意接受 { size } props 返回 svg 的函数组件
 const MyGem = (props: { size?: number }) =>
   h('svg', { width: props.size ?? 15, height: props.size ?? 15, viewBox: '0 0 24 24' },
     h('path', { d: 'M12 2 L22 12 L12 22 L2 12 Z', fill: 'currentColor' }))
-ICONS.myGem = markRaw(MyGem)
+minode.registerIcon("myGem", markRaw(MyGem))   // 运行时;或写进 icons.ts
 ```
 
-### 2.4 方法四:运行时(不改源码,试玩/差异化)
+### 2.5 方法五:运行时(不改源码,试玩/差异化)
 
 ```js
 import { Flame } from "lucide-vue-next"        // 控制台里可用 window 上的
 minode.registerIcon("flame", Flame)             // DEV 下已挂 window.minode
 minode.registerNode({ ...def, icon: "flame" })  // 覆盖或新建
 ```
-运行时注册**不持久化**(刷新即失),适合验证效果后再落进 registry.ts。
+运行时注册**不持久化**(刷新即失),适合验证效果后再落进源码。
 
-### 2.5 图标渲染链细节(NodeIcon.vue 全文即 18 行)
+### 2.6 图标渲染链细节(NodeIcon.vue 全文即 19 行)
 
 ```
 ICONS[getDef(type).icon] ?? ICONS.hand   ← 未知类型兜底手型图标
@@ -99,7 +120,8 @@ ICONS[getDef(type).icon] ?? ICONS.hand   ← 未知类型兜底手型图标
 class="nt-icon cat-{category}"           ← 分类类(可做图标底色/滤镜钩子)
 :style="def.accent ? { color: accent } : undefined"   ← 主色着色
 ```
-lucide 图标用 `currentColor`,所以 **accent 天然作用于图标描边**。
+lucide 图标用 `currentColor`,所以 **accent 天然作用于图标描边**;
+像素贴图是 `<img>`,accent 只作用于名称文字(位图不吃着色)。
 
 ---
 
@@ -113,8 +135,9 @@ lucide 图标用 `currentColor`,所以 **accent 天然作用于图标描边**。
 accent 同时作用三处:
 1. 图标颜色(NodeIcon 内联 style);
 2. 节点名称文字色(NodeItem `:style="def.accent ? { color: def.accent }"`);
-3. 写入行内 CSS 变量 `--node-accent`(NodeItem 行上)——**预留钩子,
-   当前 CSS 尚未消费**,想做"选中边框用各自主色"时直接用它:
+3. 写入行内 CSS 变量 `--node-accent`(NodeItem 行上)——**触发变色动画
+   消费它**(`fx-ok` 渐变染的就是这个色,见 §5),其他样式也可用它,
+   记得带 fallback:`var(--node-accent, var(--accent))`,例如:
    ```css
    .row-main.selected { border-left-color: var(--node-accent, var(--accent)); }
    ```
@@ -203,8 +226,8 @@ NodeItem 的行(`.row-main`)从左到右:
 
 | 动效 | 触发 | 实现 | 位置 |
 |---|---|---|---|
-| **触发脉冲** row-pulse | 点击可交互节点 | 背景 `--accent-soft` → 透明 0.55s | main.css + NodeItem fireFx |
-| **图标弹跳** icon-pop | 同上(同一 class) | scale 1→1.3 rotate(-8°)→1,0.45s | main.css |
+| **触发变色** fx-ok | 节点被成功触发(交互有条目/行为完成) | 一道 `--node-accent` 色波从行左扫到右,1.2s | main.css keyframes + NodeItem 订阅 game/fx.ts |
+| **无效变灰** fx-fail | 触发落空(查无交互条目/冷却/缺料) | 灰波左→右扫过 1.2s,警示玩家 | 同上 |
 | 折叠箭头旋转 | twisty | transform rotate 90°,0.12s | NodeItem scoped |
 | 行悬停渐变 | :hover | background transition 0.12s | NodeItem scoped |
 | 拖拽占位 | 拖动中 | `.sortable-ghost` opacity .35 | main.css |
@@ -213,28 +236,48 @@ NodeItem 的行(`.row-main`)从左到右:
 | 图鉴浮窗进出 | 开/关 | Vue `<Transition name="float">` opacity+translateY 0.16s | App.vue |
 | 抽屉/对话框 | EP 内建 | el-drawer/el-dialog 自带 | — |
 
-### 5.2 触发脉冲的实现机制(为什么这么绕)
+(历史:曾有过 fireFx 图标弹跳 icon-pop + 背景闪 row-pulse,已删除——
+用户反馈不好看,改为上表的按结果渐变。)
 
-```ts
-// NodeItem.vue
-const fx = ref(false)
-function fireFx() {
-  fx.value = false                                  // ① 先复位(允许连点重触发)
-  requestAnimationFrame(() => {                     // ② 下一帧再置真,
-    fx.value = true                                 //    CSS 动画才会从头播放
-    setTimeout(() => (fx.value = false), 600)       // ③ 600ms 后收尾
-  })
-}
+### 5.2 触发特效的架构:事件总线(game/fx.ts)
+
+**事件源与播放分离,这是视觉层的架构预留**:
+
 ```
-模板:`.row-main` 绑 `:class="{ 'trigger-fx': fx, … }"`。
-直接重复置 true 不会重启 CSS animation——**复位→rAF→置真**是标准重触发手法。
+store 触发结算点                     game/fx.ts                    NodeItem
+(点击/自动驱动同源)   ──emit──▶  reactive Map<nodeId,{outcome}>  ──watch──▶  播放 CSS 动画
+  triggerNode/trigger              (store 外,不落盘)             .fx-ok / .fx-fail
+  startExplore/resolveExplore
+  craftBench/driveAutoTrigger
+```
+
+- **store 广播结果**:每个结算点 `emitTriggerFx(nodeId, "ok" | "fail")`;
+  `trigger()` 返回结算结果(ok=交互表有条目——产出/风味/掷骰未中都算;
+  fail=查无条目)。父节点被触发自身发 ok,子节点按各自交互结果发——
+  点击沿树传播时逐行点亮/变灰,就是瀑布流。
+- **emit 不受 silent 压制**:静默驱动(水车自动转)只压日志,视觉照播。
+- **Map 按键追踪**:Vue 的 reactive Map 让写入只触达订阅对应节点的行,
+  不惊动整棵树;条目由行卸载时 clearTriggerFx 清理。
+- **NodeItem 播放**:watch 收到事件 → 复位类 → rAF 里**强制 reflow**
+  (读行元素 offsetWidth;rAF 早于样式重算,不强制的话浏览器可能从未
+  观察到"类已移除",动画不会重启——连发与"动画刚结束"窗口都依赖这一步)
+  → 置真播放 → 1350ms 后清类(动画 1.2s)。
+  波的手法:300% 宽 `transparent→tint→transparent` 线性渐变作背景,
+  keyframes 只位移 background-position(**100%→0%**——百分比作用于
+  "容器−图片"宽度差,负值差下 100%→0% 才是左→右;两端各留 35% 透明肩,
+  波起止完全出画),背景图/尺寸写进两个关键帧以压过 hover 等普通声明——
+  改颜色改 tint,改速度改 animation 时长与 FX_HOLD_MS。
 
 **keyframes 放在 main.css(非 scoped)的原因**:scoped keyframes 会被编译器
-加哈希后缀,跨组件(子组件 NodeIcon 的 `.nt-icon`)与动态插入的元素引用不到。
-全局动画 + 全局类名(`.row-main.trigger-fx`)是最稳的组合。
+加哈希后缀,动态类名引用不到。全局动画 + 全局类名(`.row-main.fx-ok`)最稳。
 
-想改触发效果:改 main.css 的两个 keyframes;想改持续时长:同步改 fireFx 里的
-600ms(略长于动画时长即可)。
+想改触发效果:改 main.css 的 `fx-ok / fx-fail` 两个 keyframes;
+想改持续时长:同步改 NodeItem 里的 `FX_HOLD_MS`(略长于动画时长即可)。
+
+**未来扩展(同一事件源,引擎零改动)**:
+- 错峰瀑布:给事件加 `delayMs` 字段(或按触发深度延迟),NodeItem 延迟起播;
+- 粒子/音效:新组件订阅 `triggerFxOf` 全表,不碰 NodeItem;
+- 按类型差异化:NodeDef 加 fx 相关字段,NodeItem 播放时读取。
 
 ### 5.3 动效设计原则(项目约定)
 
@@ -326,14 +369,14 @@ glow?: boolean
 
 | 想改什么 | 去哪改 |
 |---|---|
-| 某物品图标 | registry.ts → def.icon(键需在 ICONS 中;新图标先加 ICONS,§2) |
+| 某物品图标 | 像素贴图:丢进 src/assets/icons/ 即注册,def.icon = 文件名(零代码);lucide:game/icons.ts(§2) |
 | 某节点颜色 | registry.ts → def.accent |
 | 分类标签颜色 | NodeItem.vue scoped → `.nt-cat.cat-xxx` |
 | 全局配色/主题 | styles/main.css `:root` 调色板(+ body 背景 + EP 对齐) |
 | 行长相(卡片式/紧凑) | NodeItem.vue scoped → `.row-main` 及相邻规则 |
 | 选中态样式 | `.row-main.selected` |
 | 堆徽标/子数胶囊 | `.nt-pile` / `.nt-kids` |
-| 触发动画 | main.css `@keyframes row-pulse / icon-pop` + fireFx 时长 |
+| 触发动画 | main.css `@keyframes fx-ok / fx-fail` + NodeItem `FX_HOLD_MS`;事件源 game/fx.ts(§5.2) |
 | 拖拽虚影 | main.css `.sortable-fallback`(只微调,勿换机制) |
 | 拖拽重排速度 | dnd.ts DND_COMMON `animation` |
 | 图鉴浮窗动画 | App.vue `.float-*` 过渡类 |
@@ -351,5 +394,5 @@ glow?: boolean
 - [ ] 触屏(hover:none)下可用性(按钮常显、目标 ≥40px)?
 - [ ] 改了 GameNode 结构的话:SAVE_VERSION + 三处同步?
 - [ ] 深浅色对比度(护眼浅绿底上的淡色文字是刻意分层,别一刀切提黑);
-- [ ] `--node-accent` 是已绑定未消费的预留钩子,消费它时记得 fallback:
+- [ ] `--node-accent` 已被触发变色动画消费(fx-ok);其他消费点记得 fallback:
       `var(--node-accent, var(--accent))`。

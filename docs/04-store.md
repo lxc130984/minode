@@ -1,6 +1,6 @@
 # 04 · 状态层(src/stores/)
 
-> 两 个 store:`game`(全部游戏状态与动作,816 行)与 `ui`(界面开关,28 行)。
+> 两 个 store:`game`(全部游戏状态与动作,932 行)与 `ui`(界面开关,28 行)。
 > 另有一个模块级响应式时钟 `gameNow` 与若干模块级纯函数。
 
 ## 1. game store 总览
@@ -16,6 +16,8 @@ export const useGameStore = defineStore("game", { state, getters, actions, persi
 | `SAVE_VERSION = 5` | 存档结构版本;不匹配的存档自动重置(迁移策略见 07) |
 | `SAVE_KEY = "game"` | localStorage 键(persist.key 与之共用) |
 | `gameNow: Ref<number>` | 游戏时钟(见 §1.4) |
+| `autoTriggerBehaviorOf(node)` | 取节点 def 声明的自触发行为;非自触发节点返回 null(组件用它判断"要不要显示驱动状态") |
+| `autoTriggerReady(b, parent)` | 自触发节点是否已就位:直接挂在 `poweredBy` 指定的类型下(缺省 = 恒就位)。**驱动判定与界面状态共用这一处口径** |
 | `BoardId = "world" \| "backpack"` | 面板标识;`boardRoots(board)` 返回对应根数组 |
 | `isSaveValid(saved)` | 存档深度校验(见 07 §2) |
 | `ensureSaveIntegrity()` | 启动时清掉不合规存档(main.ts 在 pinia 之前调用) |
@@ -31,6 +33,7 @@ export const useGameStore = defineStore("game", { state, getters, actions, persi
 | `takeNodes(list, type, n)` | **叶优先**移除 n 个同类节点,返回未满足数;移除父节点时其异类剩余子节点 splice 回上层原位置(不连带销毁) |
 | `recipeStateOf(selectedId, piles)` | 配方 × 材料状态:`{recipe, inputs:[{stack,have,ok}], craftable}` |
 | `exploreBehaviorOf(node)` | 取节点自身 def 的 explore 行为(非 explore 返回 null) |
+| `autoTriggerAt` | 模块级 Map(node id → 下一次驱动时间戳 ms):见 §1.4。store 外、不落盘 |
 
 ### 1.3 state(全部字段)
 
@@ -47,7 +50,7 @@ export const useGameStore = defineStore("game", { state, getters, actions, persi
 | `discovered` | string[] | ✓ | 已发现地形类型(图鉴点亮) |
 | `log` | LogEntry[] | ✓ | 日志,上限 200(超出从头裁剪) |
 | `logSeq` | number | ✓ | 日志序号发号器 |
-| `selectedId` | string\|null | ✓ | 选中节点(检查器显示对象;世界∪背包∪任何位置) |
+| `selectedId` | string\|null | ✓ | 检查器联动节点(**点击行不再选中**——由「详情/选择配方」按钮设置;世界∪背包∪任何位置) |
 | `uid` | number | ✓ | 节点 id 发号器 |
 | `dragging` | boolean | ✗ | 全局拖拽中标记(NodeItem @start/@end 设置;驱动 CSS 投放区显隐) |
 
@@ -68,10 +71,23 @@ pinia-plugin-persistedstate 会对**每次 mutation** 全量序列化写 localSt
 放在 store 外的 ref 里,getters 引用 `gameNow.value` 仍具响应性,
 但不再触发持久化。`playSeconds` 也因此不落盘(由 startedAt 推算)。
 
-`onClock()` 只做一件事:`exploring && now >= exploreEndAt → resolveExplore()`。
+`onClock()` 里的探索结算是:`exploring && now >= exploreEndAt → resolveExplore()`
+(此外它还会驱动自触发节点,见 §2.7)。
 后台标签页定时器被浏览器节流 → 结算延迟到回前台(时间戳驱动,自动对账,设计内)。
 
-### 1.5 getters
+**同理,自触发计时表 `autoTriggerAt` 也在 store 之外**(模块级 Map,见 §1.2):
+它每秒都可能变化,放进 state 等于每秒一次全量写盘;它也不该落盘——
+刷新/导入存档后重新计时,玩家不会因为挂机时间长短得到意外的产出。
+
+### 1.5 触发特效事件总线(game/fx.ts,store 外)
+
+瞬态视觉状态,与 gameNow/autoTriggerAt 同理不进 store、不落盘。
+store 的每个触发结算点 `emitTriggerFx(nodeId, "ok" | "fail")` 写入
+`reactive Map`(Vue 的 Map 按键追踪,写入只触达订阅对应节点的行);
+NodeItem `watch(triggerFxOf(node.id))` 播放水平渐变动画,行卸载时
+`clearTriggerFx` 清条目。详见 14 §5.2。
+
+### 1.6 getters
 
 | getter | 语义 |
 |---|---|
@@ -92,7 +108,7 @@ pinia-plugin-persistedstate 会对**每次 mutation** 全量序列化写 localSt
 ### 2.1 基础
 
 - **reset()** — `$patch(freshState())` + 两条欢迎日志。存档重置/新档入口。
-- **onClock()** — 见 §1.4。
+- **onClock()** — 每秒心跳的入口:探索到点结算(§2.5)+ 自触发驱动(§2.7)。
 - **pushLog(text, kind="info")** — 追加日志,超 200 裁头。kind 决定颜色(gain 绿/craft 紫/warn 橙/info 灰)。
 - **newNodeId() / makeNode(type)** — 造节点:`{id:"n"+ ++uid, type, children:[], collapsed:true}`。
 - **boardRoots(board)** — world→nodes,backpack→backpack。
@@ -100,12 +116,20 @@ pinia-plugin-persistedstate 会对**每次 mutation** 全量序列化写 localSt
 
 ### 2.2 点击与交互
 
-- **clickNode(id)** — 核心点击分发:
-  1. `findNode(nodes) ?? findNode(backpack)` 找不到直接 return;
-  2. 选中;
-  3. 读 def.behavior:`view-toggle` → 只选中(界面层已处理开关);`explore` → `startExplore(node)`;`craft` → `craftBench(node)`;其他 behavior → 静默;
-  4. 无 behavior(普通节点):有子 → 逐子 `trigger(node.type, child.type)`;叶子 → `trigger("hand", node.type)`。
-- **trigger(source, target)** — 查交互表:无条目→"没有效果"warn;results 空→纯 note;掷骰全空→"一无所获";命中→逐 drop `addItem`(随后打 note)。
+- **clickNode(id)** — 点击入口:世界∪背包查找(找不到直接 return)→ `triggerNode(node)`。
+  **不再设置 selectedId**(节点是可拖动的按钮,没有点击选中态)。
+- **triggerNode(node, silent=false)** — **唯一的"触发一个节点"口径**,点击与时钟驱动都走它:
+  1. 读 def.behavior:`view-toggle` → 不分发(界面层处理);`explore` → `startExplore(node)`;`craft` → `craftBench(node)`;`auto-trigger` → `driveAutoTrigger(node, silent)`;其他 behavior → 静默;
+  2. 无 behavior(普通节点):有子 → 自身 emit fx ok(点击落地),再逐子
+     `emitTriggerFx(child.id, trigger(node.type, child.type, silent))`;叶子 →
+     `emitTriggerFx(node.id, trigger("hand", node.type, silent))`。
+     子节点按各自交互结果点亮/变灰,视觉是沿树传播的瀑布流。
+- **trigger(source, target, silent=false): "ok" | "fail"** — 查交互表并**返回结算结果**:
+  无条目 → "没有效果"warn + `fail`;results 空 → 纯 note + `ok`;
+  掷骰全空 → "一无所获"warn + `ok`(交互有效,只是运气);命中 → 逐 drop `addItem`(随后打 note)+ `ok`。
+  `silent`(由自动驱动传入)只保留 `addItem` 的产出日志,风味/警告/"一无所获"一律不打——
+  每 3 秒一次的背景行为不该把 200 条日志上限刷掉(I-12 同款取向:别打扰玩家)。
+  **fx 广播不受 silent 压制**(自动驱动也要看得见)。
 
 ### 2.3 树操作
 
@@ -138,25 +162,38 @@ pinia-plugin-persistedstate 会对**每次 mutation** 全量序列化写 localSt
 
 ### 2.5 探索
 
-- **startExplore(node)** — 全局冷却中 → "还在探索中"warn;否则
-  `exploring=true; exploringNodeId=node.id; exploreEndAt=now+(行为.durationMs ?? 5000)` + 日志。
+- **startExplore(node)** — 全局冷却中 → "还在探索中"warn + fx fail;否则
+  `exploring=true; exploringNodeId=node.id; exploreEndAt=now+(行为.durationMs ?? 5000)` + 日志 + fx ok。
 - **resolveExplore()**(由 onClock 到点触发)—
   1. `exploring=false`;
   2. 结算目标:`exploringNodeId` 查世界→背包,**兜底 explorerNode**;清空 exploringNodeId;
-  3. `Math.random() >= 行为.successRate` → "一无所获";
+  3. `Math.random() >= 行为.successRate` → "一无所获" + fx fail;
   4. `rollPool(行为.pool)` 选地形 → `explorer.children.push(makeNode)`;
      **explorer.collapsed=false(展开让玩家看见)**;
-  5. discovered 去重追加 + "探索成功"日志。
+  5. discovered 去重追加 + "探索成功"日志 + fx ok。
 
 ### 2.6 手工合成
 
 - **selectRecipe(id)** — getRecipe 存在才生效;切换 + 日志。
 - **craftBench(bench?)** — `target = bench ?? benchNode`:
   1. **计料**:DFS target.children,`piles[type]++`(每个节点计 1,与消耗同口径);
-  2. recipeStateOf 校验;缺料 → "材料不足:xxx(缺 N)"warn 并返回;
+  2. recipeStateOf 校验;缺料 → "材料不足:xxx(缺 N)"warn + fx fail 并返回;
   3. **消耗**:逐 input `takeNodes(target.children, input.type, input.count)`;
-     若有未满足(计数与移除口径不一致的防御,不应发生)→ "材料出现异常,已中止";
-  4. `addItem(output, silent=true)` + "合成成功"craft 日志。
+     若有未满足(计数与移除口径不一致的防御,不应发生)→ "材料出现异常,已中止" + fx fail;
+  4. `addItem(output, silent=true)` + "合成成功"craft 日志 + fx ok。
+
+### 2.7 自触发驱动(水车等)
+
+- **driveAutoTrigger(node, silent=false)** — 自身 emit fx ok(被驱动的心跳脉冲),
+  再依次 `triggerNode(child, silent)` 触发该节点的每个子节点
+  (水车 → 石斧 → 森林)。手动点击水车 = 立即驱动一次(带完整风味日志);到点自动驱动 = silent。
+- **tickAutoTriggers()** — 由 onClock 每秒调用:
+  1. `dragging` 中整体跳过(避免与 Sortable 的落盘序列抢写);
+  2. DFS 世界 + 背包,逐个判断"已就位"(`autoTriggerReady`):
+     首次就位 → 记 `now + intervalMs`,并打一条"「水车」被河流推动,每 3 秒驱动一次"。**收集**待驱动节点;
+     到点 → 重排下一拍(迟到只补一次,不做离线补算);
+     失去动力/被移走的节点 → 从 `autoTriggerAt` 删除(重新就位时从零开始);
+  3. 遍历结束**之后**才统一驱动 —— 驱动会改树(产出入背包),不边走边改。
 
 ## 3. 拖拽相关 action(与 05-dnd 配套阅读)
 
