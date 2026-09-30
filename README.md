@@ -14,6 +14,11 @@
 - 背包里同类物品自动堆叠成一棵小树(显示前 4 个 + 省略号)
 - 存档自动保存在浏览器本地,支持导出/导入 JSON
 
+## 文档
+
+架构与交接文档(数据模型、拖拽系统、不变量、踩坑实录、扩展指南):
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
 ## 技术栈
 
 Vue 3 + TypeScript + Pinia(持久化)+ Element Plus + lucide 图标;
