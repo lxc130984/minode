@@ -43,8 +43,9 @@ export function setDragging(v: boolean) {
 /**
  * 面板树列表 @add:
  * - 从背包拖进世界(根级落点):放置提示一句;
- * - 挂上子节点时自动展开(默认折叠的节点获得可见的子树)。
- * 守卫已按数据拒绝跨区整树,落库物必是单节点——不再需要落库分拣(settle)。
+ * - 挂上子节点时自动展开(默认折叠的节点获得可见的子树);
+ * - 落进背包:延迟把落点堆规约回「根+直接子叶」不变量(展平/填满/溢出)——
+ *   必须延迟到 Sortable 落盘回写之后(同步改数据会被库覆盖,历史坑 §1.1)。
  */
 export function onTreeAdd(
   board: BoardId,
@@ -63,6 +64,14 @@ export function onTreeAdd(
     game.pushLog(`「${getDef(dropped.type).name}」被放置进了世界。`, "info")
   }
   if (owner?.collapsed) owner.collapsed = false
+
+  if (board === "backpack") {
+    setTimeout(() => {
+      // 落点是普通物品堆 → 规约整堆;落在功能节点/根下但拖入物自带子树 → 规约拖入物
+      if (owner && !getDef(owner.type).behavior) game.normalizePile(owner)
+      else if (dropped.children.length > 0) game.normalizePile(dropped)
+    }, 0)
+  }
 }
 
 /**

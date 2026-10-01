@@ -1,20 +1,21 @@
 /**
  * 工作系统:节点做事需要时间(点击 ≠ 立刻结算)。
  *
- * 一次"工作" = { 哪个节点、做什么、何时完成 }:点击可交互节点不再瞬时结算,
- * 而是挂一条工作记录,到点由 resolveWork 结算(交互掷骰/合成/探索产出)。
- * 工作中的节点处于忙碌态:再次点击无效(现实里不可能一瞬间砍一棵树)。
- * 视觉:行底的进度条(game/work.ts 的 reactive Map 就是进度条的数据源)。
+ * click 链式传导模型:一次点击是一个带来源(source,"hand" 或节点 type)的
+ * click 事件。传导节点(relay,工具)瞬间转发;工作节点收到它接受的 click
+ * 后在自己身上挂一条工作(进度条在它身上),到点结算产出并把 click
+ * (来源改写为自己)继续传给子节点;自触发节点(水车)就位后运行可见的
+ * 计时循环(kind="cycle"),每圈向子节点发一轮 click。
  *
- * 为什么是 store 外的模块级 reactive Map(同 gameNow / autoTriggerAt):
+ * 为什么是 store 外的模块级 reactive Map(同 gameNow):
  * endAt 每拍都在逼近,放进 store state 既不该持久化(刷新后重头来,
- * 不把挂机折算成产出——与自触发计时同一取向),也不该让进度触发存档
- * 全量写盘;Vue 的 Map 按键追踪,写入只触达对应行的进度条。
+ * 不把挂机折算成产出),也不该让进度触发存档全量写盘;
+ * Vue 的 Map 按键追踪,写入只触达对应行的进度条。
  */
 import { reactive } from "vue"
 
 /** 工作种类:决定到点时套哪段结算逻辑 */
-export type WorkKind = "interact" | "explore" | "craft"
+export type WorkKind = "click" | "explore" | "craft" | "cycle"
 
 export interface WorkJob {
   kind: WorkKind
@@ -22,8 +23,10 @@ export interface WorkJob {
   endAt: number
   /** 总时长(供进度条换算) */
   durationMs: number
-  /** 静默结算(被水车自动驱动的工作):只记产出日志,不刷风味 */
+  /** 静默结算(自动链路):只记产出日志,不刷风味 */
   silent: boolean
+  /** click 工作的来源("hand" 或来源节点 type):结算查交互表 + 行内「⟵来源」标注 */
+  source?: string
   /** craft 工作快照的配方 id:结算按开工时的配方,不受期间切换配方影响 */
   recipeId?: string
   /** 准点结算的定时器(挂工作方写入);清除工作时必须撤销——
@@ -34,8 +37,14 @@ export interface WorkJob {
 const jobs = reactive(new Map<string, WorkJob>())
 
 /** 挂一条工作(同节点已有工作 = 调用方应先判忙碌) */
-export function startWork(nodeId: string, kind: WorkKind, durationMs: number, silent: boolean): WorkJob {
-  const job: WorkJob = { kind, endAt: Date.now() + durationMs, durationMs, silent }
+export function startWork(
+  nodeId: string,
+  kind: WorkKind,
+  durationMs: number,
+  silent: boolean,
+  source?: string,
+): WorkJob {
+  const job: WorkJob = { kind, endAt: Date.now() + durationMs, durationMs, silent, source }
   jobs.set(nodeId, job)
   return job
 }
@@ -64,4 +73,24 @@ export function clearAllWork(): void {
     if (job.timer) clearTimeout(job.timer)
   }
   jobs.clear()
+  rejects.clear()
+}
+
+// ── 断链/拒绝反馈:click 传到这里断了(接收不了/忙碌/被占用) ──
+// 行元素抖一下,告诉玩家链条在哪里断的。与工作表同款生命周期。
+
+const rejects = reactive(new Set<string>())
+
+/** 广播一次"click 被拒"(行抖动反馈) */
+export function emitReject(nodeId: string): void {
+  rejects.add(nodeId)
+}
+
+/** 订阅(一次性):NodeItem watch 后立即 clearReject 消费掉 */
+export function rejectQueued(nodeId: string): boolean {
+  return rejects.has(nodeId)
+}
+
+export function clearReject(nodeId: string): void {
+  rejects.delete(nodeId)
 }

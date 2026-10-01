@@ -33,33 +33,21 @@ function processLimit(type: string): number {
   return typeof mp === "number" && mp > 0 ? mp : Infinity
 }
 
-/** 在 roots 里找 nodeId 所属的顶层节点(堆根) */
-/**
- * 沿同类祖先上行,找到节点所属"堆"的根。
- * 容量必须按堆根判定:挂到堆内部任何层级(包括叶子)都算并入整堆;
- * 堆挂在功能节点(如手工合成)下时,堆根仍是同类链的顶端,不越过功能节点。
- */
-function stackRootOf(roots: GameNode[], node: GameNode): GameNode {
-  let current = node
-  for (;;) {
-    const parent = findNode(roots, current.id)?.parent
-    if (parent && parent.type === current.type) current = parent
-    else return current
-  }
-}
-
-/**
- * 把 whole(整棵子树)并入 pile 后是否仍不超过堆上限。
- * 容量按"子树总件数"判定:父 + 所有后代各计 1,
- * 这样嵌套子堆/整堆搬运都无法绕过上限。
- */
-function canAbsorb(pile: GameNode, whole: GameNode): boolean {
-  return nodeCount(pile) + nodeCount(whole) <= stackLimit(pile.type)
-}
+// 历史注记:堆叠容量曾用 stackRootOf(沿同类祖先找堆根)+ canAbsorb(子树总量)
+// 做递归判定,堵过三条绕过路径;自从堆恒为「根+直接子叶」(normalizePile
+// 自动展平)后嵌套不复存在,递归判定随之退役(见 docs/11 §2.5)。
 import type { AutoTriggerBehavior, GameNode, LogEntry, LogKind } from "../game/types"
 import { nodeCount } from "../game/types"
 import { countNodes, findNode, isAncestorOf, removeNode } from "../game/tree"
-import { allWork, clearAllWork, clearWork, startWork, workOf, type WorkKind } from "../game/work"
+import {
+  allWork,
+  clearAllWork,
+  clearWork,
+  emitReject,
+  startWork,
+  workOf,
+  type WorkKind,
+} from "../game/work"
 
 const LOG_LIMIT = 200
 /** 普通工作的默认时长:未声明 workMs 的节点做一次事要花的时间 */
@@ -76,11 +64,11 @@ export const SAVE_KEY = "game"
 export const gameNow = ref(Date.now())
 
 /**
- * 自触发节点的下一次驱动时间(node id → 时间戳 ms)。
- * 与 gameNow 同理放在 store 之外:每秒都可能变化,不该触发持久化写盘,
- * 也不需要落盘(刷新/导入存档后重新计时)。
+ * 已播报过"开始运转"的自触发节点 id(onClock 清扫失去就位条件的)。
+ * 计时循环本身是工作表里的 kind="cycle" 记录(可见进度条),
+ * 这里只记播报态,不落盘。
  */
-const autoTriggerAt = new Map<string, number>()
+const cycleAnnounced = new Set<string>()
 
 /** 节点面板(board)标识:世界、背包…… 未来可继续扩展同构面板 */
 export type BoardId = "world" | "backpack"
@@ -293,7 +281,7 @@ export function occupierOfWorkingAncestor(roots: GameNode[], node: GameNode): Ga
     const parent = findNode(roots, current.id)?.parent
     if (!parent) return null
     const job = workOf(parent.id)
-    if (job && (job.kind === "interact" || job.kind === "craft")) return parent
+    if (job && (job.kind === "click" || job.kind === "craft")) return parent
     current = parent
   }
 }
@@ -362,18 +350,35 @@ export const useGameStore = defineStore("game", {
     },
 
     /**
-     * 游戏循环心跳:由 App 每秒驱动。只做"到点结算",
+     * 游戏循环心跳:由 App 每秒驱动。只做"到点结算"与"计时循环播种",
      * 时钟本身在 store 之外的 gameNow 里,避免每秒触发一次存档写盘。
      * 工作结算以 endAt 时间戳对账:setTimeout 负责前台的准点结算,
      * 这里兜后台节流造成的迟到(只补一次,不做离线补算)。
+     * 拖拽中整体跳过(避免与 Sortable 的落盘序列抢写)。
      */
     onClock() {
-      if (!this.dragging) {
-        for (const [id, job] of allWork()) {
-          if (gameNow.value >= job.endAt) this.resolveWork(id)
+      if (this.dragging) return
+      for (const [id, job] of allWork()) {
+        if (gameNow.value >= job.endAt) this.resolveWork(id)
+      }
+      // 计时循环播种:就位的自触发节点(还没在循环中)启动可见循环;
+      // 失去就位条件的清掉播报标记,重新就位时会再告知一次
+      const ready = new Set<string>()
+      const walk = (ns: GameNode[], parent: GameNode | null) => {
+        for (const node of ns) {
+          const b = autoTriggerBehaviorOf(node)
+          if (b && autoTriggerReady(b, parent)) {
+            ready.add(node.id)
+            this.seedCycle(node, parent)
+          }
+          walk(node.children, node)
         }
       }
-      this.tickAutoTriggers()
+      walk(this.nodes, null)
+      walk(this.backpack, null)
+      for (const id of [...cycleAnnounced]) {
+        if (!ready.has(id)) cycleAnnounced.delete(id)
+      }
     },
 
     pushLog(text: string, kind: LogKind = "info") {
@@ -407,96 +412,117 @@ export const useGameStore = defineStore("game", {
     clickNode(id: string) {
       const hit = findNode(this.nodes, id) ?? findNode(this.backpack, id)
       if (!hit) return
-      this.triggerNode(hit.node)
+      this.dispatchClick(hit.node, "hand", false)
     },
 
     /**
-     * 触发一个节点 = 让它开始做事:语义与"点击它"完全一致(自触发行为也走
-     * 这里,"被驱动"与"被点击"是同一条路径)。
-     * 做事需要时间(work):挂一条工作记录,行底进度条随之填充,到点由
-     * resolveWork 结算(交互掷骰/合成/探索产出)。工作中的节点忙碌,
-     * 再次触发无效(现实里不可能一瞬间砍一棵树)。
-     * 视图开关(如「背包」节点)即时生效,不走工作;自触发节点(水车)被
-     * 触发 = 立即驱动子节点,忙碌的是子节点们。
-     * silent:自动驱动(水车等)用——结算时只记产出,不刷风味/一无所获日志。
+     * click 链式传导:一个带来源(source,"hand" 或节点 type)的 click 到达节点。
+     * 所有节点都会自动传导——区别只在"这个 click 让自己做什么":
+     * - 普通节点:查交互表 (source, 自己)——有产出条目 → 在自己身上开工
+     *   (进度条在接收者身上,节奏取来源工具的 workMs,空手取自己的),
+     *   到点结算后把「来源=自己」的 click 传给子节点;纯风味 → 立即回应后
+     *   继续传导;查无条目 → 自己不做事,瞬间传导(工具的瞬时转发即特例);
+     *   既没活干也没子节点 → 链断在自己身上,灰闪提示。
+     * - 探索/合成(玩家动作):只收空手 click,其他来源灰闪拒绝且不再传播
+     *   (篝火接收不了"来自森林"的 click)。
+     * - 自触发(水车):手动点击 = 立即向子节点发一轮 click(转一圈);
+     *   就位后运行可见的计时循环(kind="cycle",行底进度条就是节拍),
+     *   每圈到点自动发一轮。
+     * 忙碌/被占用:灰闪反馈,链条停止(silent 时不打日志,视觉照播)。
      */
-    triggerNode(node: GameNode, silent = false) {
+    dispatchClick(node: GameNode, source: string, silent = false) {
       const def = getDef(node.type)
       const behavior = def.behavior
 
-      // 视图开关行为(如「背包」节点)由界面层处理,即时生效,不受忙碌/占用影响
+      // 视图开关行为(如「背包」节点)由界面层处理,即时生效
       if (behavior?.kind === "view-toggle") return
 
-      // 前置检查(任何分发/挂工作之前):忙碌与被占用对一切触发一视同仁——
-      // 注定没有效果的触发立即拒绝/回应,不白等工作时长
+      // 自触发:手动转一圈(不受自身计时循环的忙碌限制);就位则(重)开循环
+      if (behavior?.kind === "auto-trigger") {
+        for (const child of node.children) {
+          this.dispatchClick(child, node.type, silent)
+        }
+        this.seedCycle(node)
+        return
+      }
+
       if (workOf(node.id)) {
+        emitReject(node.id)
         if (!silent) this.pushLog(`「${def.name}」还在忙碌中……`, "warn")
         return
       }
-      // 占用:祖上有正在进行的工作(interact/craft),本节点是流程参与物
-      // (如石斧正在砍的那棵森林)——被占用期间不可自行触发
+      // 占用:祖上有正在进行的工作,本节点是流程参与物
       const occupier = occupierOfWorkingAncestor(
         findNode(this.nodes, node.id) ? this.nodes : this.backpack,
         node,
       )
       if (occupier) {
+        emitReject(node.id)
         if (!silent) {
           this.pushLog(`「${def.name}」正被「${getDef(occupier.type).name}」占用着。`, "warn")
         }
         return
       }
 
-      if (behavior?.kind === "auto-trigger") {
-        this.driveAutoTrigger(node, silent)
-        return
-      }
-      if (behavior && behavior.kind !== "explore" && behavior.kind !== "craft") {
-        return // 其余行为(如工厂)暂无点击语义,静默
-      }
-
-      const kind: WorkKind =
-        behavior?.kind === "explore" ? "explore" : behavior?.kind === "craft" ? "craft" : "interact"
-      if (kind === "craft") {
-        // 预检材料:不足立即拒绝(结算时还会复核,防止工作期间材料被抽走)
-        const missing = missingOf(recipeStateOf(this.selectedRecipeId, countPiles(node.children)))
-        if (missing === null) return // 没有有效配方(防御路径,不应发生)
-        if (missing.length > 0) {
-          if (!silent) this.pushLog(craftMissingMsg(missing), "warn")
+      if (behavior?.kind === "explore" || behavior?.kind === "craft") {
+        // 玩家动作(探索/合成)只收空手 click;上游传来的 click 灰闪拒绝,
+        // 链条到此为止(篝火接收不了"来自森林"的 click,也不再向下传播)
+        if (source !== "hand") {
+          emitReject(node.id)
+          if (!silent) {
+            this.pushLog(`「${def.name}」接收不了来自「${getDef(source).name}」的触发。`, "warn")
+          }
           return
         }
-      } else if (kind === "interact") {
-        if (node.children.length > 0) {
-          // 流程节点:子节点里没有任何可交互条目 → 立即告知,不空转
-          if (!node.children.some((c) => findInteraction(node.type, c.type))) {
-            if (!silent) {
-              this.pushLog(`「${def.name}」对下面的节点似乎都产生不了什么效果。`, "warn")
-            }
-            return
-          }
-        } else {
-          const it = findInteraction("hand", node.type)
-          if (!it || it.results.length === 0) {
-            // 空手摸一把没有产出可言(纯提示/风味):立即回应,不耗时
-            this.trigger("hand", node.type, silent)
+        if (behavior.kind === "craft") {
+          // 预检材料:不足立即拒绝(结算时还会复核,防止工作期间材料被抽走)
+          const missing = missingOf(recipeStateOf(this.selectedRecipeId, countPiles(node.children)))
+          if (missing === null) return // 没有有效配方(防御路径,不应发生)
+          if (missing.length > 0) {
+            if (!silent) this.pushLog(craftMissingMsg(missing), "warn")
             return
           }
         }
+        const kind: WorkKind = behavior.kind === "explore" ? "explore" : "craft"
+        const duration =
+          kind === "explore"
+            ? (exploreBehaviorOf(node)?.durationMs ?? def.workMs ?? DEFAULT_WORK_MS)
+            : (def.workMs ?? DEFAULT_WORK_MS)
+        const job = startWork(node.id, kind, duration, silent, "hand")
+        if (kind === "craft") job.recipeId = this.selectedRecipeId
+        if (kind === "explore" && !silent) this.pushLog("你向着未知出发……", "info")
+        job.timer = setTimeout(() => this.resolveWork(node.id), duration)
+        return
       }
+      if (behavior) return // 其余行为(如工厂)暂无点击语义,静默
 
-      const duration =
-        kind === "explore"
-          ? (exploreBehaviorOf(node)?.durationMs ?? getDef(node.type).workMs ?? DEFAULT_WORK_MS)
-          : (getDef(node.type).workMs ?? DEFAULT_WORK_MS)
-      const job = startWork(node.id, kind, duration, silent)
-      if (kind === "craft") job.recipeId = this.selectedRecipeId // 快照:结算按开工时的配方
-      if (kind === "explore" && !silent) this.pushLog("你向着未知出发……", "info")
-      // 前台准点结算;后台节流的迟到由 onClock 按 endAt 时间戳对账。
-      // 定时器记进工作:reset/导入存档全清时一并撤销,防旧定时器撞新世界同号节点
-      job.timer = setTimeout(() => this.resolveWork(node.id), duration)
+      // 普通节点:所有节点都会自动传导——先看这个 click 让自己做什么:
+      // 有产出条目 → 在自己身上开工(进度条在接收者身上,节奏由来源工具决定),
+      // 到点结算后继续向下传导;查无条目/纯风味 → 自己不做事,瞬间把
+      // 「来源=自己」的 click 传给子节点(工具的瞬时转发就是它的特例);
+      // 既没活干也没有子节点 = 链断在自己身上,灰闪提示(挥了个空)。
+      const it = findInteraction(source, node.type)
+      if (it && it.results.length > 0) {
+        const duration =
+          source !== "hand"
+            ? (getDef(source).workMs ?? def.workMs ?? DEFAULT_WORK_MS)
+            : (def.workMs ?? DEFAULT_WORK_MS)
+        const job = startWork(node.id, "click", duration, silent, source)
+        job.timer = setTimeout(() => this.resolveWork(node.id), duration)
+        return
+      }
+      if (it) this.trigger(source, node.type, silent) // 纯风味:接受但无事发生
+      if (node.children.length > 0) {
+        for (const child of node.children) {
+          this.dispatchClick(child, node.type, silent)
+        }
+        return
+      }
+      if (!it) emitReject(node.id) // 无条目也无子节点:click 到这就断了
     },
 
     /**
-     * 工作到点结算:按工作种类分发到对应的即时结算逻辑。
+     * 工作到点结算:按工作种类分发。
      * 节点在开始工作后被移走/删除 → 工作作废(静默丢弃);
      * 拖拽进行中不结算(与 Sortable 的落盘序列抢写),onClock 稍后再来。
      */
@@ -512,71 +538,46 @@ export const useGameStore = defineStore("game", {
         this.finishExplore(node, job.silent)
       } else if (job.kind === "craft") {
         this.craftBench(node, job.recipeId, job.silent)
+      } else if (job.kind === "cycle") {
+        // 计时循环到点:向子节点发一轮「来自自己」的 click;仍就位则重新计时
+        for (const child of node.children) {
+          this.dispatchClick(child, node.type, true)
+        }
+        this.seedCycle(node, hit.parent)
       } else {
-        if (node.children.length > 0) {
-          for (const child of node.children) {
-            this.trigger(node.type, child.type, job.silent)
-          }
-        } else {
-          this.trigger("hand", node.type, job.silent)
+        // click 工作:结算交互产出,再把 click(来源=自己)传给子节点
+        this.trigger(job.source ?? "hand", node.type, job.silent)
+        for (const child of node.children) {
+          this.dispatchClick(child, node.type, job.silent)
         }
       }
     },
 
     /**
-     * 驱动一个自触发节点:依次"触发"它的每个子节点
-     * (子节点按被点击的语义开始各自的工作,如水车 → 石斧 → 森林)。
-     * 既用于到点自动驱动(silent),也用于玩家手动点击。
+     * 自触发节点的可见计时循环:就位(直接挂在 poweredBy 指定类型下)则
+     * 挂一条 kind="cycle" 的工作(行底进度条即节拍),每圈到点由 resolveWork
+     * 向子节点发 click 并重新计时;未就位/已有工作则不动。
+     * 返回是否真的启动了循环。
      */
-    driveAutoTrigger(node: GameNode, silent = false) {
-      for (const child of node.children) {
-        this.triggerNode(child, silent)
+    seedCycle(node: GameNode, parentHint?: GameNode | null): boolean {
+      const b = autoTriggerBehaviorOf(node)
+      if (!b) return false
+      if (workOf(node.id)) return false
+      const parent =
+        parentHint ?? findNode(this.nodes, node.id)?.parent ?? findNode(this.backpack, node.id)?.parent ?? null
+      if (!autoTriggerReady(b, parent)) return false
+      const intervalMs = Math.max(250, b.intervalMs) // 防内容误配 0/负数造成自旋
+      const job = startWork(node.id, "cycle", intervalMs, true)
+      if (!cycleAnnounced.has(node.id)) {
+        cycleAnnounced.add(node.id)
+        const powered = b.poweredBy ? `被${getDef(b.poweredBy).name}推动` : "开始运转"
+        this.pushLog(
+          `「${getDef(node.type).name}」${powered},每 ${Math.round(intervalMs / 1000)} 秒驱动一次。`,
+          "info",
+        )
       }
-    },
-
-    /**
-     * 自触发节点的周期驱动(由 onClock 每秒调用):
-     * 已就位(直接挂在 poweredBy 指定类型下)的节点到点即驱动一次。
-     * 计时表在 store 外(同 gameNow:不落盘);后台节流造成的迟到只补一次,
-     * 不做离线补算;拖拽中整体跳过,避免与 Sortable 的落盘序列抢写。
-     */
-    tickAutoTriggers() {
-      if (this.dragging) return
-      const now = gameNow.value
-      const running = new Set<string>()
-      const due: GameNode[] = []
-      const walk = (ns: GameNode[], parent: GameNode | null) => {
-        for (const node of ns) {
-          const b = autoTriggerBehaviorOf(node)
-          if (b && autoTriggerReady(b, parent)) {
-            running.add(node.id)
-            const nextAt = autoTriggerAt.get(node.id)
-            if (nextAt == null) {
-              // 首次就位:记下第一拍,并告诉玩家它开始运转了
-              autoTriggerAt.set(node.id, now + b.intervalMs)
-              const source = b.poweredBy ? `被${getDef(b.poweredBy).name}推动` : "开始运转"
-              this.pushLog(
-                `「${getDef(node.type).name}」${source},每 ${Math.round(b.intervalMs / 1000)} 秒驱动一次。`,
-                "info",
-              )
-            } else if (now >= nextAt) {
-              autoTriggerAt.set(node.id, now + b.intervalMs)
-              due.push(node)
-            }
-          }
-          walk(node.children, node)
-        }
-      }
-      walk(this.nodes, null)
-      walk(this.backpack, null)
-      // 已被移走/失去动力的节点丢掉计时,重新就位时从零开始
-      for (const id of [...autoTriggerAt.keys()]) {
-        if (!running.has(id)) autoTriggerAt.delete(id)
-      }
-      // 遍历完再统一驱动:驱动会改树(产出入背包等),不边走边改
-      for (const node of due) {
-        this.driveAutoTrigger(node, true)
-      }
+      job.timer = setTimeout(() => this.resolveWork(node.id), intervalMs)
+      return true
     },
 
     /**
@@ -672,15 +673,70 @@ export const useGameStore = defineStore("game", {
       this.pushLog(`「${def.name}」已收进背包。`, "info")
     },
 
-    /** 把一个节点整棵并入背包堆(挂到最近一个还能整堆吸收它的同类堆下,否则成为新根) */
+    /**
+     * 把节点(及其子树)并入背包堆:全部展平成单件,先填进还有空间的同类堆,
+     * 装不下的开新堆(根 + 直接子叶,至多 maxStack 件)。
+     * 背包堆不变量:堆 = 根 + 同类叶子,没有子子节点——存储就是平的。
+     */
     stackIntoBackpack(node: GameNode) {
-      const root = [...this.backpack]
-        .reverse()
-        .find((n) => n.type === node.type && canAbsorb(n, node))
-      if (root) {
-        root.children.push(node)
-      } else {
-        this.backpack.push(node)
+      const type = node.type
+      const limit = stackLimit(type)
+      // 展平:node 自己 + 所有后代变成单件列表(后代引用全部剥离)
+      const items: GameNode[] = [node]
+      const walk = (ns: GameNode[]) => {
+        for (const n of ns) {
+          items.push(n)
+          walk(n.children)
+        }
+      }
+      walk(node.children)
+      node.children = []
+      for (const n of items) n.children = []
+      let left = items
+      // 并入现有堆(从后往前;余量按子树总量算——旧档可能有嵌套堆,防御)
+      for (const pile of [...this.backpack].reverse()) {
+        if (pile.type !== type) continue
+        const space = limit - nodeCount(pile)
+        if (space > 0) {
+          const take = left.slice(0, space)
+          pile.children.push(...take)
+          left = left.slice(take.length)
+          if (left.length === 0) return
+        }
+      }
+      // 开新堆:根 + 最多 limit-1 个直接子,剩余继续
+      while (left.length > 0) {
+        const [root, ...rest] = left
+        root.children = rest.slice(0, limit - 1)
+        left = rest.slice(limit - 1)
+        this.backpack.push(root)
+      }
+    },
+
+    /**
+     * 落库整理:把一个背包堆规约回「根 + 直接子叶」不变量(拖拽落库后调用,
+     * 必须延迟到 Sortable 回写之后)。展平整棵子树,填到 maxStack 为止,
+     * 溢出的单件回 stackIntoBackpack 重堆。世界侧不适用(挂载是流程,可嵌套)。
+     */
+    normalizePile(pile: GameNode) {
+      if (getDef(pile.type).behavior) return // 功能节点(合成台)的子级不限制
+      const limit = stackLimit(pile.type)
+      const items: GameNode[] = []
+      const walk = (ns: GameNode[]) => {
+        for (const n of ns) {
+          items.push(n)
+          walk(n.children)
+        }
+      }
+      walk(pile.children)
+      pile.children = []
+      for (const n of items) n.children = []
+      const keep = items.slice(0, limit - 1)
+      const overflow = items.slice(limit - 1)
+      pile.children = keep
+      if (overflow.length > 0) {
+        this.pushLog(`${overflow.length} 件物品溢出到了新的堆。`, "info")
+        for (const n of overflow) this.stackIntoBackpack(n)
       }
     },
 
@@ -777,7 +833,7 @@ export const useGameStore = defineStore("game", {
 
     /**
      * 点击手工合成节点:检测该节点下挂载的材料并按当前配方合成。
-     * 材料不足在 triggerNode 挂工作时已预检过一次;这里是到点结算时的复核
+     * 材料不足在 dispatchClick 挂工作时已预检过一次;这里是到点结算时的复核
      * (工作期间材料可能被抽走)。recipeId 用工作快照(开工时的配方),
      * 缺省当前配方;silent(被自动驱动)不打结算日志。
      */
@@ -846,17 +902,9 @@ export const useGameStore = defineStore("game", {
       if (board === "world") {
         if (owner.children.length + 1 > processLimit(owner.type)) return false
       } else if (!getDef(owner.type).behavior) {
-        // 普通物品:子级只能挂同类,且并入后不超过堆上限。
-        // 容量以「同类链堆根」的子树总量判定 —— 挂到堆内部任何层级
-        // (包括叶子节点、挂在功能节点下的堆)都视为并入整堆,无法绕过 maxStack;
-        // 同一堆内部的整理不改变总量,放行。
+        // 普通物品:子级只能挂同类。容量不在这里拦——落库后 normalizePile
+        // 自动展平 + 填满上限 + 溢出(背包堆恒为「根 + 直接子叶」,无嵌套)
         if (type && type !== owner.type) return false
-        if (dragNode) {
-          const fromWorld = !!findNode(this.nodes, dragId)
-          const pileRoot = stackRootOf(this.backpack, owner)
-          const dragRoot = stackRootOf(fromWorld ? this.nodes : this.backpack, dragNode)
-          if (dragRoot.id !== pileRoot.id && !canAbsorb(pileRoot, dragNode)) return false
-        }
       }
       return !isAncestorOf(this.boardRoots(board), dragId, ownerId)
     },

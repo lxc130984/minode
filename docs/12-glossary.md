@@ -13,7 +13,9 @@
 | 放置 | place | 把物品从背包放进世界,**一次只放一个**(placeItem;拖拽整堆进世界被守卫②拒绝) |
 | 回收 / 收纳 | nodeToItem | 把(世界里的)节点收进背包——**一条一条来**:还挂着子节点会被拒绝,先移走它们(守卫②b 对拖拽同理) |
 | 处理上限 | maxProcess | 世界区一个节点最多同时挂几个【直接】子节点(流程语义:斧子只面对它的树)。石斧 1 / 水车 2 / 河流 2,缺省不限 |
-| 堆叠上限 | maxStack | 背包区一堆同类物品的最大件数(**子树总量**;与处理上限相对) |
+| 堆叠上限 | maxStack | 背包一堆「根+直接子叶」的最大件数;拖堆入堆自动展平、超限填满溢出(normalizePile) |
+| 展平 | normalize | 落库整理:把堆规约回根+直接子叶不变量,溢出单件重堆(树嵌套树不复存在) |
+| 堆叠容器 | stack-root | 堆父节点的"盒子"视觉样式:它代表整堆,不可整棵拖进世界 |
 | 功能节点 | functional / `!!def.behavior` | 带声明式行为的节点(探索/手工合成/背包开关/自触发/预留工厂);背包子级不受同类规则限制 |
 | 永久节点 | permanent | 不可被"移除"操作删除(探索/背包节点/手工合成) |
 | 省略号 / 省略行 | stack-ellipsis | 背包堆子节点 >4 时显示的"⋯ 还有 N 个"行,在子列表外部、pointer-events:none |
@@ -37,7 +39,10 @@
 | 像素贴图 | asset icon | `src/assets/icons/` 下的图片文件,构建期经 import.meta.glob 自动注册为图标,键 = 文件名(去扩展名);同名覆盖 lucide 图标 |
 | 工作 | work | 一次"做事":触发可交互节点后挂上的一条记录 `{kind, endAt, durationMs, silent}`(game/work.ts,store 外不落盘);到点由 resolveWork 结算 |
 | 工作时长 | workMs | NodeDef 字段:做这件事要多久(缺省 1500ms;探索以 behavior.durationMs 为准) |
-| 忙碌 | busy | 节点有工作中的记录(workOf 命中):再次触发无效,提示"还在忙碌中" |
+| 忙碌 | busy | 节点有工作中的记录(workOf 命中):click 打上来灰闪落空 |
+| click | dispatchClick | 带来源("hand" 或节点 type)的点击事件,沿树向下传播的唯一口径;所有节点自动传导 |
+| 断链 | reject | click 传到某节点断了(接收不了/忙碌/被占用/挥空):行灰闪 0.45s,链条终止 |
+| 计时循环 | cycle | 自触发节点就位后的可见节拍(kind="cycle" 工作,行底常驻进度条),每圈向子节点发一轮 click |
 | 占用 | occupied | 祖先有正在进行的工作(interact/craft),本节点是流程参与物(如石斧正在砍的森林):行半透明置灰、点击被拦"正被占用";判定与触发前置检查共用 occupierOfWorkingAncestor |
 | 进度条 | work-track | 行底 2px 细线,accent 色从左向右匀速填满 = 工作剩余时间;到点结算后消失 |
 | 检查器 | Inspector | 右抽屉:「详情」按钮选中节点的详情与操作(收纳/放置/移除/选择配方);点击行本身不选中 |

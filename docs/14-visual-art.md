@@ -226,7 +226,8 @@ NodeItem 的行(`.row-main`)从左到右:
 
 | 动效 | 触发 | 实现 | 位置 |
 |---|---|---|---|
-| **工作进度条** work-track | 节点开始做事(触发挂上工作) | 行底 2px 细线,该类型 accent 色从左向右匀速填满,到点结算后消失 | NodeItem scoped keyframes;数据源 game/work.ts |
+| **工作进度条** work-track | click 的接收者开始做事(craft/explore 同) | 行底 2px 细线,accent 色匀速填满+行内 `⟵ 来源` 标注;水车的 cycle 计时是**常驻**节拍条 | NodeItem scoped;数据源 game/work.ts |
+| **断链灰闪** rejected | click 传到这里断了(接收不了/忙碌/挥空) | 整行灰一闪 0.45s,链条断点的唯一视觉信号 | NodeItem scoped keyframes |
 | 触发按钮反馈 | .act-trigger | hover 加深/按下 scale .97;展开态 inset 细描边 | NodeItem scoped |
 | 行悬停渐变 | :hover | background transition 0.12s | NodeItem scoped |
 | 拖拽占位 | 拖动中 | `.sortable-ghost` opacity .35 | main.css |
@@ -244,7 +245,7 @@ NodeItem 的行(`.row-main`)从左到右:
 **数据与视觉分离**:store 挂工作(reactive Map),NodeItem 拉取渲染:
 
 ```
-store 触发(triggerNode)           game/work.ts                   NodeItem
+store click 链式传导(dispatchClick) game/work.ts                  NodeItem
 点击/自动驱动同源     ──挂──▶  reactive Map<nodeId, WorkJob>  ──读──▶  .work-track
   startWork + setTimeout          {kind, endAt, durationMs,       animation-duration
   resolveWork 到点结算             silent}(store 外,不落盘)      = 剩余时间,scaleX 填充

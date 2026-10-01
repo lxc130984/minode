@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed } from "vue"
+import { computed, onUnmounted, ref, watch } from "vue"
 import { VueDraggable } from "vue-draggable-plus"
 import { Settings2, Ellipsis, PanelRightOpen, PanelRightClose } from "lucide-vue-next"
-import { workOf } from "../game/work"
+import { clearReject, rejectQueued, workOf } from "../game/work"
 import { DND_COMMON, onTreeAdd, setDragging, treeGroup } from "../game/dnd"
 import { getDef, getRecipe } from "../game/registry"
 import type { GameNode } from "../game/types"
@@ -80,7 +80,7 @@ const autoSub = computed(() => {
 })
 
 /**
- * 工作进度条:节点开始做事(triggerNode 挂上工作)时,行底一条细线
+ * 工作进度条:节点开始做事(dispatchClick 挂上工作)时,行底一条细线
  * 从左到右匀速填满,到点结算后消失。纯 CSS transform 动画,无 JS 帧驱动。
  * duration = 总时长、delay = -已耗时:中途(折叠/展开)重挂载也能从真实比例续走。
  */
@@ -92,6 +92,33 @@ const workStyle = computed(() => {
   const elapsed = Math.max(0, j.durationMs - left)
   return { animationDuration: `${j.durationMs}ms`, animationDelay: `-${elapsed}ms` }
 })
+
+/** click 工作的来源标注:进度条上显示 ⟵来源(空手/石斧…),玩家看得出
+ *  这一进度是"谁"驱动的(被石斧砍伐 vs 被空手翻找) */
+const workSourceLabel = computed(() => {
+  const j = work.value
+  if (!j || j.kind !== "click" || !j.source) return null
+  return j.source === "hand" ? "空手" : getDef(j.source).name
+})
+
+/** 断链/拒绝反馈:click 传到这里断了(接收不了/忙碌/被占用/挥空)→ 灰闪一下。
+ * 一次性事件:消费后立即清除,复位→置真保证连发可重播 */
+const rejected = ref(false)
+let rejectTimer: ReturnType<typeof setTimeout> | undefined
+watch(
+  () => rejectQueued(props.node.id),
+  (queued) => {
+    if (!queued) return
+    clearReject(props.node.id)
+    rejected.value = false
+    requestAnimationFrame(() => {
+      rejected.value = true
+      clearTimeout(rejectTimer)
+      rejectTimer = setTimeout(() => (rejected.value = false), 550)
+    })
+  },
+)
+onUnmounted(() => clearTimeout(rejectTimer))
 
 /**
  * 交互范式(用户明确要求):行 = 组织(拖拽 + 折叠),触发 = 左侧的显式按钮。
@@ -105,8 +132,8 @@ function onRowClick() {
 /** 可触发 = 功能节点(按 behavior 分发)或世界面板里的普通节点;背包普通物品为静态身份块 */
 const canTrigger = computed(() => isFunctional.value || props.board === "world")
 
-/** 触发按钮:视图开关节点切换分屏;其余走 clickNode——
- *  触发 = 开始工作(行底进度条),到点结算;忙碌/占用由引擎前置检查拦截。 */
+/** 触发按钮:视图开关节点切换分屏;其余走 clickNode → dispatchClick(node, "hand")
+ *  ——click 链式传导入口;忙碌/占用/断链由引擎灰闪反馈。 */
 function onTriggerClick() {
   if (isViewToggle.value) {
     const view = def.value.behavior?.kind === "view-toggle" ? def.value.behavior.view : "backpack"
@@ -137,8 +164,17 @@ function openRecipe() {
   >
     <div
       class="row-main"
-      :class="{ selected, occupied, expanded, functional: isFunctional, 'view-toggle': isViewToggle }"
+      :class="{
+        selected,
+        occupied,
+        expanded,
+        rejected,
+        'stack-root': isItemStack,
+        functional: isFunctional,
+        'view-toggle': isViewToggle,
+      }"
       :style="def.accent ? { '--node-accent': def.accent } : undefined"
+      :title="isItemStack ? '堆叠容器:整堆不可拖进世界,放置一次一件' : undefined"
       @click="onRowClick"
     >
       <!-- 节点身份 = 触发按钮(图标+名字):可触发的行按下即做事;
@@ -171,6 +207,7 @@ function openRecipe() {
       <span v-if="autoSub" class="nt-sub auto-state" :class="{ ready: autoReady, need: !autoReady }">
         {{ autoSub }}
       </span>
+      <span v-if="workSourceLabel" class="nt-sub work-source">⟵ {{ workSourceLabel }}</span>
       <span class="nt-fill" />
       <span v-if="isItemStack" class="nt-pile mono">×{{ stackTotal }}</span>
       <span v-else-if="hasChildren && !noChildren" class="nt-kids mono">
@@ -259,6 +296,24 @@ function openRecipe() {
 /* 被占用(祖上工作正在进行):整行淡化,示意它是流程参与物、暂不可自行触发 */
 .row-main.occupied {
   opacity: 0.55;
+}
+/* 断链/拒绝:click 传到这里断了——灰闪一下,链条断点的唯一视觉信号 */
+.row-main.rejected {
+  animation: reject-flash 0.45s ease-out;
+}
+@keyframes reject-flash {
+  from {
+    background: color-mix(in srgb, var(--fg-faint) 38%, transparent);
+  }
+  to {
+    background: transparent;
+  }
+}
+/* 堆叠容器(背包堆的父节点):身份块换成"盒子"样式——它代表整堆,
+ * 不能整棵拖进世界,视觉上与普通单件区分开 */
+.row-main.stack-root .nt-id {
+  background: var(--bg-soft);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 .row-main.functional .nt-name {
   font-weight: 600;

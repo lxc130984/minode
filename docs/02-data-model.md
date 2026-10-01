@@ -40,7 +40,7 @@ export const isStack = (n: GameNode): boolean =>
   n.children.every((c) => c.type === n.type && isStack(c))
 ```
 
-`nodeCount` 用于:堆徽标显示、容量判定(canAbsorb)、addItem 分堆逻辑。
+`nodeCount` 用于:堆徽标显示、余量计算(stackIntoBackpack 防御旧档嵌套)、addItem 分堆逻辑。
 `isStack` 用于:NodeItem 判断"背包里这是不是一个纯堆"(纯堆才显示 ×N 徽标;
 挂在手工合成下的混合子树不显示,避免误导)。
 
@@ -96,8 +96,8 @@ export interface NodeDef {
 | `worldOnly` | boolean | `zonesOf()` | 仅世界。等价于 `zones: ["world"]`,是它的简写 |
 | `zones` | `NodeZone[]` | `zonesOf()→canPlaceInZone()` | 允许存在的区域,细粒度。如 bench `["backpack"]`。**缺省规则**:显式 zones 优先;否则 worldOnly→`["world"]`;否则全部区域。**拖拽守卫/收纳/放置/存档校验全部经 canPlaceInZone,勿绕过** |
 | `noChildren` | boolean | NodeItem | 不渲染子列表 = 不可挂子节点、点击行也无折叠(背包节点)。"可被挂到其他节点上"不受影响 |
-| `maxStack` | number | stackLimit→canAbsorb/addItem/守卫 | 一堆同类物品最大件数(父+子)。缺省=∞。材料 64、石斧 1 |
-| `workMs` | number | triggerNode→startWork | 工作时长:触发后要做事多久才结算(期间忙碌+行底进度条)。缺省=store 的 DEFAULT_WORK_MS(1500);探索以 behavior.durationMs 为准 |
+| `maxStack` | number | normalizePile/stackIntoBackpack/addItem | 堆叠上限:一堆「根+直接子叶」的最大件数(拖堆入堆自动展平,超限填满溢出)。缺省=∞。材料 64、工具 1 |
+| `workMs` | number | dispatchClick→startWork | 工作时长:click 接收者做事多久才结算(期间忙碌+行底进度条)。缺省=1500;探索以 durationMs 为准;工具的 workMs = 它驱动的工作节奏(铜斧砍得快) |
 | `maxProcess` | number | processLimit→拖拽守卫规则⑤ | 处理上限:世界区最多同时挂几个【直接】子节点(流程语义——斧子只面对它的树,不数子子节点)。缺省=∞。石斧 1 / 水车 2 / 河流 2 |
 | `permanent` | boolean | removeNodeById | 不可移除(探索/背包节点/手工合成) |
 | `behavior` | NodeBehavior | clickNode 分发 / 守卫(功能性判定) | 见 §3。**有 behavior 的节点叫"功能节点"**,其背包子级不受同类堆叠规则限制 |
@@ -125,28 +125,29 @@ export type NodeBehavior =
   | ViewToggleBehavior
 ```
 
-| 行为 | 定义 | 触发时(store.triggerNode) | 点击时(界面层 NodeItem) |
+| 行为 | 定义 | click 到达时(store.dispatchClick) | 触发按钮(界面层) |
 |---|---|---|---|
-| `explore` | `{ kind, durationMs, successRate, pool: {type, weight}[] }` | 挂 kind="explore" 的工作(时长=durationMs),到点 `finishExplore(node)`——参数从**被触发节点自身**的 def 读取 | 任何面板都触发,行底进度条填充 |
-| `craft` | `{ kind }` | 挂 kind="craft" 的工作(workMs),到点 `craftBench(node)`——以被触发节点为合成台 | 同上;行尾显示 ⚙ 配方按钮 |
+| `explore` | `{ kind, durationMs, successRate, pool: {type, weight}[] }` | **只收空手 click**:挂 kind="explore" 工作(时长=durationMs ?? workMs ?? 1500),到点 finishExplore;非空手灰闪拒绝 | 任何面板都触发,行底进度条填充 |
+| `craft` | `{ kind }` | **只收空手 click**:预检材料→挂 kind="craft" 工作,到点 craftBench(快照配方);非空手灰闪拒绝 | 同上;行尾 ⚙ 配方按钮 |
 | `factory` | `{ kind, inputs, outputs, intervalMs }` | 静默 return(暂无语义) | — |
-| `auto-trigger` | `{ kind, intervalMs, poweredBy? }` | `driveAutoTrigger(node)`——依次触发自身每个子节点(手动 "转一圈";子节点各自开始工作) | 同上;行内显示就位状态副标题 |
-| `view-toggle` | `{ kind, view: "backpack" \| "codex" }` | **不分发**(界面层即时处理,不走工作) | 按 `behavior.view` 调 ui.toggleBackpack/toggleCodex |
+| `auto-trigger` | `{ kind, intervalMs, poweredBy? }` | 手动点击=立即向子节点发 click+seedCycle;就位后 onClock 播种 kind="cycle" 可见计时循环,每圈到点向子节点发 click | 行内显示就位副标题;行底常驻节拍条 |
+| `view-toggle` | `{ kind, view: "backpack" \| "codex" }` | **不分发**(界面层即时处理) | 按 `behavior.view` 调 ui.toggleBackpack/toggleCodex |
 
-普通节点(无 behavior)同样走工作:挂 kind="interact" 的工作(时长 workMs),
-到点结算交互——有子逐子 `trigger(自身, child)`,叶子 `trigger("hand", 自身)`。
-触发有**前置检查**(忙碌/被祖先占用/可做性——缺料、空挂、空手纯风味都
-立即回应,不耗时);工作中(workOf 有记录)再次触发 → "还在忙碌中"warn。
-详见 04 §2.2 与 10 I-16。
+普通节点(无 behavior)走 **click 链式传导**(04 §2.2):收到 click 先查
+(source, 自己)——有产出条目→挂 kind="click" 工作在**自己身上**(进度条+
+「⟵来源」标注,时长取**来源工具**的 workMs,空手取自己的),结算后把
+click(来源=自己)传给子节点;查无条目/纯风味→瞬间下传;没活干也没子节点
+→灰闪断链。忙碌/被占用:灰闪落空。
 
-`auto-trigger` 还有第二条(时钟)路径:`onClock → tickAutoTriggers()` 每拍检查一次,
-**已就位**(直接挂在 `poweredBy` 指定的类型下,如水车挂在河流下)的节点每 `intervalMs`
-驱动一次;自动驱动复用同一条 `triggerNode` 路径(带 `silent`:只记产出、不刷风味日志),
-计时表在 store 之外且不落盘(见 04 §1.4)。两条路径语义一致:**被驱动 ≡ 被点击**。
+`auto-trigger` 的时钟路径已并归工作系统:onClock 播种 kind="cycle" 的可见
+计时循环(行底常驻节拍条),每圈到点向子节点发 `dispatchClick(child, 自身, silent)`
+(只记产出、不刷风味日志);循环不落盘,失位即停(见 04 §2.7)。
+**被驱动 ≡ 被点击**,同一条 dispatchClick 口径。
 
-设计意图:**新增一种行为 = 扩联合类型 + `triggerNode` 加一个分发分支**,不需要碰组件
-(组件只看"有没有 behavior"和"是不是 view-toggle")。点击与时钟驱动共用 `triggerNode`,
-任何"触发一个节点"的新入口都应当走它,避免出现第二套分发口径。
+设计意图:**新增一种行为 = 扩联合类型 + `dispatchClick` 加一个分发分支**,
+不需要碰组件(组件只看"有没有 behavior"和"是不是 view-toggle")。
+点击/链式传导/计时循环共用 `dispatchClick`,任何"给节点发 click"的
+新入口都应当走它,避免出现第二套分发口径。
 探索/合成的"按发起节点结算"是硬性要求(历史上曾回落到全局单例 benchNode,
 导致第二台合成台错乱,见 11-pitfalls §8)。
 

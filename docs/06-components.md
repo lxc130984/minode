@@ -65,7 +65,7 @@ width:min(440px,94vw); max-height:76vh; z-index:60`,Transition `float`(透明度
 |---|---|
 | `def` | getDef(node.type) |
 | `selected` | game.selectedId === node.id |
-| `occupied` | 祖上有 interact/craft 工作进行(occupierOfWorkingAncestor)——流程参与物,行置灰 |
+| `occupied` | 祖上有 click/craft 工作进行(occupierOfWorkingAncestor)——流程参与物,行置灰 |
 | `children` | `Array.isArray(node.children) ? … : []` ——**瞬态帧防御**(拖拽中数据可能短暂非数组) |
 | `hasChildren` | children.length > 0 |
 | `isItemStack` | `board==="backpack" && isStack(node) && hasChildren` ——纯堆才有 ×N 徽标 |
@@ -88,8 +88,16 @@ width:min(440px,94vw); max-height:76vh; z-index:60`,Transition `float`(透明度
 
 ```
 view-toggle → 按 behavior.view 调 ui.toggleCodex()/toggleBackpack(),return(即时)
-其余 → game.clickNode(node.id)   ← 触发 = 开始工作,行底进度条随之填充
+其余 → game.clickNode(node.id) → dispatchClick(node, "hand")   ← click 链式传导入口
 ```
+
+**click 反馈(行上三种状态)**:
+- **工作进度条** `.work-track`:在 click 的**接收者**身上,行底细线匀速填满,
+  同时显示 `⟵ 来源` 小标注(空手/石斧…),玩家看得出这一进度是谁驱动的;
+- **断链灰闪** `.rejected`:click 传到这里断了(接收不了/忙碌/被占用/挥空),
+  整行灰一闪(0.45s)——链条断点的唯一视觉信号;
+- **堆叠容器** `.stack-root`:背包堆的父节点身份块换成"盒子"样式
+  (bg-soft + 内描边;title 提示"整堆不可拖进世界")。
 
 - 显隐 `canTrigger = isFunctional || board==="world"`;不可触发的行
   (背包普通物品)渲染为同构的**静态** `.nt-id`(同 padding 对齐,无底色无指针);
@@ -107,8 +115,8 @@ view-toggle → 按 behavior.view 调 ui.toggleCodex()/toggleBackpack(),return(�
 **工作进度条**:NodeItem 计算 `workOf(node.id)`(game/work.ts 的 reactive
 Map,Vue 按键追踪只触达本行)。有工作 → 行底渲染 `.work-track`(2px 细线,
 该类型 accent 色 85% 透明度),`animation-duration` 内联 = 剩余工作时间,
-CSS `scaleX(0→1)` 匀速填满,到点结算后随工作记录清除而消失。纯 CSS,
-无 JS 帧驱动;忙碌中再触发由 store 前置检查拦截(warn"还在忙碌中")。
+CSS `scaleX(0→1)` 匀速填满,到点结算后随工作记录清除而消失(kind="cycle"
+的水车计时循环因此是**常驻**节拍条)。纯 CSS 无 JS 帧驱动。
 
 ### 行内元素(从左到右)
 

@@ -106,6 +106,13 @@ export function validateContent(): string[] {
   const problems: string[] = []
   for (const d of NODE_DEFS) {
     if (d.icon && !ICONS[d.icon]) problems.push(`节点 "${d.id}" 的图标 "${d.icon}" 未注册`)
+    for (const [k, v] of [["workMs", d.workMs], ["maxStack", d.maxStack], ["maxProcess", d.maxProcess]] as const) {
+      if (typeof v === "number" && v <= 0) problems.push(`节点 "${d.id}" 的 ${k} 必须是正数(当前 ${v})`)
+    }
+    const b = d.behavior
+    if (b?.kind === "auto-trigger" && b.intervalMs <= 0) {
+      problems.push(`节点 "${d.id}" 的 intervalMs 必须是正数(当前 ${b.intervalMs})`)
+    }
   }
   for (const i of INTERACTIONS) {
     if (i.source !== "hand" && !DEF_MAP[i.source]) {

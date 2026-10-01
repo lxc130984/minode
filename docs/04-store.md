@@ -28,15 +28,15 @@ export const useGameStore = defineStore("game", { state, getters, actions, persi
 | 函数 | 说明 |
 |---|---|
 | `stackLimit(type)` | `def.maxStack > 0 ? maxStack : Infinity` |
-| `stackRootOf(roots, node)` | 沿**同类祖先**上行找堆根:`parent = findNode(roots, cur.id)?.parent;while(parent.type===cur.type) cur=parent`。**不越过功能节点**——挂在 bench 下的木堆,其堆根仍是那个木堆 |
-| `canAbsorb(pile, whole)` | `nodeCount(pile)+nodeCount(whole) <= stackLimit(pile.type)`——容量判定的唯一形式 |
+| `processLimit(type)` | `def.maxProcess > 0 ? maxProcess : Infinity`(世界处理上限) |
+| (历史)stackRootOf/canAbsorb | 递归容量判定已随堆展平不变量退役,见 §2.4 与 11 §2.5 |
 | `findNodeByType(nodes, type)` | DFS 按类型找第一个 |
 | `takeNodes(list, type, n)` | **叶优先**移除 n 个同类节点,返回未满足数;移除父节点时其异类剩余子节点 splice 回上层原位置(不连带销毁) |
 | `recipeStateOf(selectedId, piles)` | 配方 × 材料状态:`{recipe, inputs:[{stack,have,ok}], craftable}` |
 | `countPiles(children)` | 统计子树材料 `type→件数`(每个同类节点计 1,与 takeNodes 消耗同口径;benchPiles getter / craft 预检与复核共用) |
 | `missingOf(state)` / `craftMissingMsg(missing)` | 配方缺料描述列表(state 无效为 null)/ "材料不足"日志文案的唯一来源 |
 | `exploreBehaviorOf(node)` | 取节点自身 def 的 explore 行为(非 explore 返回 null) |
-| `autoTriggerAt` | 模块级 Map(node id → 下一次驱动时间戳 ms):见 §1.4。store 外、不落盘 |
+| `cycleAnnounced` | 模块级 Set(已播报"开始运转"的自触发节点 id);计时循环本身是工作表的 kind="cycle" 记录 |
 
 ### 1.3 state(全部字段)
 
@@ -75,20 +75,20 @@ pinia-plugin-persistedstate 会对**每次 mutation** 全量序列化写 localSt
 resolveWork`)与自触发驱动(§2.7)。setTimeout 负责前台准点结算,
 这里兜后台节流的迟到(时间戳驱动,自动对账,只补一次不做离线补算)。
 
-**同理,自触发计时表 `autoTriggerAt` 也在 store 之外**(模块级 Map,见 §1.2):
-它每秒都可能变化,放进 state 等于每秒一次全量写盘;它也不该落盘——
-刷新/导入存档后重新计时,玩家不会因为挂机时间长短得到意外的产出。
+**同理,自触发的计时循环(cycle 工作)也在工作表里**,播报去重表
+`cycleAnnounced` 是 store 外的模块级 Set:刷新/导入后循环从头计,不落盘。
 
 ### 1.5 工作系统(game/work.ts,store 外)
 
-**触发 ≠ 瞬时结算**:点击可交互节点 = 让它开始做事,做事需要时间
-(workMs),到点才结算。工作中(忙碌)的节点再次触发无效。
-工作的记录是模块级 `reactive Map<nodeId, WorkJob>`(`{kind, endAt,
-durationMs, silent}`),不进 store、不落盘(同 gameNow 理由:endAt 每拍
-逼近,不能引发存档写盘;刷新后进行中的工作作废重头,不折算挂机产出)。
-Vue 的 Map 按键追踪,写入只触达对应行的进度条。节点在 `NodeDef.workMs`
-声明时长(缺省 `DEFAULT_WORK_MS=1500`;探索以 behavior.durationMs 为准)。
-`reset()/applySaveData` 时 `clearAllWork` 全清。
+**click 的接收者做事需要时间**(workMs),到点才结算;工作中的节点忙碌,
+click 打上来灰闪落空。工作记录是模块级 `reactive Map<nodeId, WorkJob>`
+(`{kind: click|explore|craft|cycle, endAt, durationMs, silent, source?,
+recipeId?}`),不进 store、不落盘(endAt 每拍逼近,不能引发存档写盘;
+刷新后进行中的工作作废重头,不折算挂机产出;cycle 计时循环同此)。
+Vue 的 Map 按键追踪,写入只触达对应行。时长:节点 `NodeDef.workMs`
+声明(缺省 1500;探索以 durationMs 为准);click 工作的节奏由**来源工具**
+的 workMs 决定(铜斧砍得比石斧快)。`reset()/applySaveData` 时
+`clearAllWork` 全清。断链/忙碌/占用的灰闪反馈(emitReject)也在此模块。
 
 ### 1.6 getters
 
@@ -118,38 +118,43 @@ Vue 的 Map 按键追踪,写入只触达对应行的进度条。节点在 `NodeD
 
 ### 2.2 点击与交互(工作系统)
 
-- **clickNode(id)** — 点击入口:世界∪背包查找(找不到直接 return)→ `triggerNode(node)`。
+- **clickNode(id)** — 点击入口:世界∪背包查找(找不到直接 return)→ `dispatchClick(node, "hand")`。
   **不再设置 selectedId**(节点是可拖动的按钮,没有点击选中态)。
-- **triggerNode(node, silent=false)** — **唯一的"触发一个节点"口径**,点击与时钟驱动都走它。
-  触发 = **开始工作**(§1.5),不是瞬时结算;但先做**前置检查**——
-  注定没有效果的触发立即拒绝/回应,不白等工作时长(用户明确要求):
-  1. `view-toggle` → 不分发(界面层即时处理,不受忙碌/占用影响);
-  2. **忙碌**:`workOf(node.id)` 已有工作 → "「xx」还在忙碌中……"warn;
-  3. **占用**:`occupierOfWorkingAncestor` 命中(祖上有 interact/craft 工作进行,
-     本节点是流程参与物,如石斧正在砍的森林)→ "「xx」正被「yy」占用着"warn;
-  4. `auto-trigger` → `driveAutoTrigger(node, silent)`(驱动子节点开始各自的工作);
-     其他未知 behavior → 静默;
-  5. **可做性**:
-     - craft:预检材料(`countPiles` + `recipeStateOf`),缺料 → 立即"材料不足"warn
-       (到点结算时 craftBench 还会按**工作快照的配方**复核,防期间切配方/抽料);
-     - interact 有子:任一子节点在交互表有条目才开工,否则立即
-       "对下面的节点似乎都产生不了什么效果"warn;
-     - interact 叶子:`findInteraction("hand", …)` 无条目或纯风味(无产出)→
-       立即回应提示/风味文本,不耗时(空手摸一把没有"工作"可言);
-     - explore:无前置(冷却即工作本身);
-  6. 通过 → `startWork(挂工作)` + `setTimeout(resolveWork, duration)`;
-     craft 工作快照 `recipeId = selectedRecipeId`。
-     时长:探索取 behavior.durationMs ?? workMs ?? 1500;其余取 workMs ?? 1500。
-  以上拒绝在 silent(自动驱动)时都不打日志、静默跳过。
+- **dispatchClick(node, source, silent=false)** — **click 链式传导的唯一口径**
+  (玩家点击、链式转发、计时循环驱动全走它)。source 是 "hand" 或来源节点 type。
+  **所有节点都会自动传导**,区别只在"这个 click 让自己做什么":
+  1. `view-toggle` → 不分发(界面层即时处理);
+  2. `auto-trigger` → 手动"转一圈":立即向子节点发 `dispatchClick(child, node.type)`,
+     并 `seedCycle`(已就位则(重)启动可见计时循环);
+  3. **忙碌/被占用** → `emitReject`(行灰闪)+ warn,链条停止;
+  4. `explore`/`craft` → **只收空手 click**:非空手来源灰闪拒绝且不再传播
+     (篝火接收不了"来自森林"的 click);craft 先预检材料
+     (`countPiles`+`recipeStateOf`,缺料立即"材料不足";结算时按**快照配方**复核);
+     explore 时长 = durationMs ?? workMs ?? 1500;craft = workMs ?? 1500;
+  5. 普通节点:查 `findInteraction(source, node.type)`——
+     - **有产出条目** → 在自己身上挂 kind="click" 的工作(进度条在**接收者**身上,
+       行内显示「⟵ 来源」;时长 = 来源工具的 workMs ?? 自己的 ?? 1500——
+       工具节奏决定砍伐速度),到点结算后**继续向下传导**;
+     - **纯风味/查无条目** → 自己不做事,瞬间把「来源=自己」的 click 传给子节点
+       (工具的瞬时转发即它的特例:自己没活干);风味条目先回应 note;
+     - **既没活干也没子节点** → 灰闪(链断在自己身上,挥了个空)。
+  拒绝在 silent(自动链路)时不打日志,灰闪视觉照播。
 - **resolveWork(nodeId)** — 工作到点的**唯一结算入口**(setTimeout 准点调用,
   onClock 对账补迟到):摘除工作记录 → `dragging` 中不结算(等下一拍)→
   节点已不在树上则工作作废 → 按工作种类分发:
-  `explore` → `finishExplore(node)`;`craft` → `craftBench(node)`;
-  `interact` → 有子逐子 `trigger(node.type, child.type, silent)`,叶子 `trigger("hand", …)`。
+  `click` → `trigger(job.source, node.type)`(掷骰产出)后**逐子转发 click**;
+  `cycle` → 逐子转发 click(silent)后 `seedCycle` 重新计时(仍就位才续);
+  `explore` → `finishExplore(node)`;`craft` → `craftBench(node, job.recipeId)`
+  (两者完成**不**向下传导——产出不是 click)。
+- **seedCycle(node, parent?)** — 自触发节点的可见计时循环:就位
+  (直接挂在 poweredBy 指定类型下)且无工作 → 挂 kind="cycle" 的工作
+  (时长 = intervalMs,**行底进度条就是节拍**),首次启动打一条
+  "「水车」被河流推动,每 3 秒驱动一次"日志(cycleAnnounced 播报去重,
+  onClock 清扫失去就位条件的标记)。
 - **trigger(source, target, silent=false)** — 查交互表并结算一次交互:
   无条目 → "没有效果"warn;results 空 → 纯 note;
   掷骰全空 → "一无所获"warn;命中 → 逐 drop `addItem`(随后打 note)。
-  `silent`(由自动驱动传入)只保留 `addItem` 的产出日志,风味/警告/"一无所获"一律不打——
+  `silent`(自动链路)只保留 `addItem` 的产出日志——
   每 3 秒一次的背景行为不该把 200 条日志上限刷掉(I-12 同款取向:别打扰玩家)。
 
 ### 2.3 树操作
@@ -164,8 +169,13 @@ Vue 的 Map 按键追踪,写入只触达对应行的进度条。节点在 `NodeD
   1. `canPlaceInZone(type,"backpack")` 拒绝不兼容(地形);
   2. 节点还挂着子节点 → 拒绝并提示"先把它们移走,一条一条回收";
   3. `removeNode` 摘下 → `stackIntoBackpack(removed)` 并入背包堆。
-- **stackIntoBackpack(node)** — 在背包根从后往前找第一个
-  `同类型 && canAbsorb` 的堆挂进去;没有 → 成为新根。
+- **stackIntoBackpack(node)** — 把节点(及其子树)并入背包堆:**全部展平成单件**,
+  先填进还有空间的同类堆(从后往前,余量按子树总量——旧档嵌套堆防御),
+  装不下的开新堆(根 + 直接子叶,至多 maxStack 件)。
+- **normalizePile(pile)** — 落库整理:把一个背包堆规约回不变量
+  **「堆 = 根 + 同类直接子叶,没有子子节点」**(拖堆入堆后由 onTreeAdd 延迟调用):
+  展平整棵子树 → 填到 maxStack 为止 → 溢出单件回 stackIntoBackpack 重堆。
+  功能节点(合成台)的子级不适用。世界侧不适用(挂载是流程,可嵌套)。
 - **placeItem(id)** — "放置到世界"(检查器/双击,一次只放一个):
   1. 只在背包里找;`canPlaceInZone(type,"world")` 拒绝;
   2. `removeNode(backpack, id)`;
@@ -205,26 +215,28 @@ Vue 的 Map 按键追踪,写入只触达对应行的进度条。节点在 `NodeD
      若有未满足(计数与移除口径不一致的防御,不应发生)→ "材料出现异常,已中止";
   4. `addItem(output, silent=true)` + "合成成功"craft 日志。
 
-### 2.7 自触发驱动(水车等)
+### 2.7 自触发驱动(水车等)——可见计时循环
 
-- **driveAutoTrigger(node, silent=false)** — 依次 `triggerNode(child, silent)`:
-  被驱动的子节点各自开始工作(水车 → 石斧(2s)→ 结算砍柴 → 木头)。
-  手动点击水车 = 立即驱动一次(带完整风味日志);到点自动驱动 = silent。
-  水车 3s 驱动间隔 > 石斧 2s 工作时长,节奏刚好衔接;子节点忙碌中则该次驱动落空。
-- **tickAutoTriggers()** — 由 onClock 每秒调用:
-  1. `dragging` 中整体跳过(避免与 Sortable 的落盘序列抢写);
-  2. DFS 世界 + 背包,逐个判断"已就位"(`autoTriggerReady`):
-     首次就位 → 记 `now + intervalMs`,并打一条"「水车」被河流推动,每 3 秒驱动一次"。**收集**待驱动节点;
-     到点 → 重排下一拍(迟到只补一次,不做离线补算);
-     失去动力/被移走的节点 → 从 `autoTriggerAt` 删除(重新就位时从零开始);
-  3. 遍历结束**之后**才统一驱动 —— 驱动会改树(产出入背包),不边走边改。
+自触发已并归工作系统(不再有独立的 autoTriggerAt 计时表):
+
+- **seedCycle(node, parent?)** — 就位(直接挂在 poweredBy 指定类型下)且无工作 →
+  挂一条 kind="cycle" 的工作(intervalMs 时长)——**行底进度条就是节拍**,
+  玩家看得见"它在计时"。首次启动播报一次"「水车」被河流推动,每 3 秒驱动一次"
+  (cycleAnnounced 去重,onClock 清扫失位标记)。
+- **循环到点(resolveWork 的 cycle 分支)** — 向每个子节点发
+  `dispatchClick(child, node.type, silent=true)`(链式传导,断链灰闪),
+  仍就位则 seedCycle 重新计时;失去动力则循环自然停(重新就位从零开始)。
+- **手动点击** — dispatchClick 的 auto-trigger 分支:立即转一圈(发一轮 click,
+  非 silent 带完整风味日志)+ seedCycle(重)启动循环。
+- onClock 每秒:工作对账 + 播种(DFS 世界+背包,给就位而无循环的节点 seedCycle;
+  `dragging` 中整体跳过)。水车 3s 循环 > 石斧驱动的砍伐 2s,节奏衔接;
+  子节点忙碌时该次 click 灰闪落空。
 
 ## 3. 拖拽相关 action(与 05-dnd 配套阅读)
 
 - **canDropIntoChildList(dragEl, board, ownerId)** — 拖拽总守卫,详见 05 §3:
   区域权限 / 跨区整树禁止(双向一次一个) / 世界处理上限(直接子节点数)/
-  背包同类+堆叠容量(堆根子树总量)/ 防环。
-  (历史上的 settleWorldDrop/settleBackpackDrop 落库整理已随守卫收紧删除,见 05 §4。)
+  背包同类(容量不拦,落库 normalizePile 展平+溢出)/ 防环。
 
 ## 4. 存档 action(详见 07-save)
 

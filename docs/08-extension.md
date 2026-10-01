@@ -82,7 +82,7 @@ minode.validate()                          // 全量体检,返回问题列表(�
 export interface FurnaceBehavior { kind: "furnace"; heatPerTick: number }
 export type NodeBehavior = … | FurnaceBehavior
 // ② 内容包里注册节点(behavior 参数永远取自**被触发节点自身**的 def)
-// ③ store.triggerNode 加分发分支 + 前置检查;周期逻辑挂 onClock()
+// ③ store.dispatchClick 加分发分支;周期逻辑用 kind="cycle" 计时循环(onClock 播种)
 // ④ (可选)CodexView 上手指南同步
 ```
 

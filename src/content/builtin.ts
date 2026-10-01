@@ -151,13 +151,7 @@ const pack: ContentPack = {
       results: [{ type: "wood", chance: 1, count: 1 }],
       note: "石斧劈进树干,木屑纷飞!",
     },
-    // ── 风味描述(无产出) ────────────────────────────────
-    {
-      source: "hand",
-      target: "stoneAxe",
-      results: [],
-      note: "这把石斧还没挂在任何目标上。把一个节点拖到它下面,再点击它试试。",
-    },
+    // ── 风味描述(接受但无产出;无条目 = 灰闪断链) ────────
     {
       source: "stoneAxe",
       target: "river",
@@ -187,12 +181,6 @@ const pack: ContentPack = {
       target: "wood",
       results: [],
       note: "一段厚实的木料。",
-    },
-    {
-      source: "forest",
-      target: "stoneAxe",
-      results: [],
-      note: "森林「使用」石斧?这个挂法好像反了。",
     },
   ],
 

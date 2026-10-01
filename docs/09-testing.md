@@ -37,14 +37,15 @@ __game.canDropIntoChildList(el("n5", "forest", "tree"), "backpack", undefined)  
 ```
 
 - 动作测试:`addItem/placeItem/nodeToItem`(获得/收纳/放置直接生效)。
-- **工作系统测试**(触发不再瞬时结算):
+- **click 链式传导测试**(dispatchClick 是唯一口径):
   ```js
-  __game.clickNode(id)                  // 挂工作,行底进度条出现
-  __game.resolveWork(id)                // 跳过等待,立即结算(测试快捷方式)
-  // 或等真实时长:setTimeout 的准点结算 + onClock 对账双保险
+  __game.clickNode(id)                   // 空手 click,沿树传导
+  __game.dispatchClick(node, "stoneAxe") // 直接发一个来自石斧的 click
+  __game.resolveWork(id)                 // 跳过等待,立即结算该节点的工作
   ```
-  工作中再 `clickNode(id)` → 日志出现"「xx」还在忙碌中……",进度条不重启;
-  进度条 DOM:行元素内 `.work-track`(动画进行时存在,结算后消失)。
+  click 的**接收者**身上出现 `.work-track` + `⟵ 来源` 标注;传导工具
+  (自己无条目)瞬时无进度条;断链(接收不了/忙碌/挥空)行闪 `.rejected`;
+  水车就位后是常驻 cycle 进度条,每圈向子节点发一轮 click(真实心跳观察)。
   注意:点击行**不产生 selected 类**(选中只来自详情按钮)。
 
 - **截图/读 DOM 前确认标签页跑的是新代码**:vite HMR 在后台标签页会推迟

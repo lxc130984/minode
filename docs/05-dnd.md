@@ -65,13 +65,9 @@ SortableJS 的 `group.put(to, from, dragEl)` 每次悬停都会调用;
 ⑤ 处理上限    board==="world":owner.children.length + 1 > processLimit(owner.type)
               → 拒绝(maxProcess,只数【直接】子节点——世界挂载是流程,
               斧子只面对它的树;缺省不限;同列表内部重排不触发 put,不受影响)
-⑥ 同类+容量   board==="backpack" && owner 无 behavior(普通物品):
-     a. dragEl 类型 ≠ owner 类型 → 拒绝(同类堆叠规则)
-     b. 容量:pileRoot = stackRootOf(backpack, owner)   ← 沿同类祖先上行找堆根
-        dragRoot = stackRootOf(拖拽节点所在板根, dragNode)
-        dragRoot.id ≠ pileRoot.id                       ← 同一堆内部整理放行
-          && !canAbsorb(pileRoot, dragNode)              ← nodeCount(堆根)+nodeCount(拖子树) > maxStack
-        → 拒绝
+⑥ 同类堆叠    board==="backpack" && owner 无 behavior(普通物品):
+              dragEl 类型 ≠ owner 类型 → 拒绝。
+              容量不在这里拦——落库后 normalizePile 自动展平+填满+溢出
 ⑦ 防环        isAncestorOf(boardRoots(board), dragId, ownerId)(含自身)→ 拒绝
 ```
 
@@ -80,30 +76,32 @@ SortableJS 的 `group.put(to, from, dragEl)` 每次悬停都会调用;
 | | 堆叠上限 maxStack | 处理上限 maxProcess |
 |---|---|---|
 | 区域 | 背包 | 世界 |
-| 语义 | 挂载=堆叠,数**整个子树**件数 | 挂载=流程,数**直接**子节点数 |
+| 语义 | 挂载=堆叠,堆恒为「根+直接子叶」 | 挂载=流程,数**直接**子节点数 |
 | 数值 | 材料 64 / 工具 1 | 石斧 1 / 水车 2 / 河流 2;缺省不限 |
-| 判定点 | 守卫⑥ + stackIntoBackpack + addItem | 守卫⑤(程序化路径不给世界上料的入口) |
+| 判定点 | normalizePile/stackIntoBackpack/addItem(守卫⑥只拦异类) | 守卫⑤(程序化路径不给世界上料的入口) |
 
-### 为什么容量必须按"堆根"判定(三次翻车的结论)
+### 堆叠容量的历史:三次绕过 → 递归判定 → 展平不变量(现行)
 
-- 第一版:比"直接子节点数 < maxStack-1" → **嵌套子堆**绕过(1 父 + 1 子堆(62 子)时直接子数=1);
-- 第二版:比"owner 的子树总量" → 把木头挂到**满堆内部某个叶子**上,owner 是叶子(1+1≤64)→ 绕过;
-  挂在 bench 下的堆,owner 链上找不到堆 → 绕过;
-- 现行:`stackRootOf` 沿同类祖先上行(不越过功能节点),`canAbsorb(堆根, 拖子树)`。
-  同时"同一堆内部整理"(dragRoot===pileRoot,总量不变)放行,避免误拦满堆重排。
+- 第一版:比"直接子节点数" → 嵌套子堆绕过;第二版:比"owner 子树总量" →
+  挂满堆内部叶子绕过;第三版:`stackRootOf`(沿同类祖先找堆根)+ `canAbsorb`
+  (子树总量)递归判定,堵住全部绕过;
+- 现行(用户设计):拖堆入堆**自动展平**、超上限**填满溢出**——背包堆恒为
+  「根 + 直接子叶」,嵌套不复存在,递归判定随之退役(normalizePile 落库整理)。
+  详见 11-pitfalls §2.5。
 
 ## 4. 落库处理:onTreeAdd(board, owner, list, evt)
 
-树列表的 `@add`(跨列表移入时触发)。只剩两个动作:
+树列表的 `@add`(跨列表移入时触发)。三个动作:
 
 1. **放置日志**:board=world 且来自背包 且 `owner===null`(根级落点)→
    "「xx」被放置进了世界";
-2. **自动展开 owner**:`owner?.collapsed → false`(默认折叠的节点获得可见子树)。
+2. **自动展开 owner**:`owner?.collapsed → false`;
+3. **背包堆规约**:board=backpack → `setTimeout(() => normalizePile(…), 0)`——
+   落点是普通物品堆则规约整堆,否则规约自带子树的拖入物(功能节点下)。
+   必须延迟:Sortable 落盘序列还会回写源数组,同步改结构会被覆盖(§1.1)。
 
-历史上的两条"落库整理"(settleWorldDrop/settleBackpackDrop)已删除:
-守卫②/②b 按数据拒绝跨区整树后,落进背包/世界的拖拽物都只能是单节点,
-没有子树需要分拣/拆堆(曾经要 setTimeout(0) 避开 Sortable 落盘回写的
-整类问题随 settle 一起退役;详见 11-pitfalls §1.9)。
+历史上的 settleWorldDrop/settleBackpackDrop(子树分拣)已随跨区整树守卫删除;
+normalizePile 是唯一在世的落库整理(展平/填满/溢出)。
 
 ## 5. 与拖拽相关的 CSS 机制
 

@@ -61,13 +61,11 @@ src/content/xxx.ts ─────┘  registerContent 等     │   INTERACTION
 | hand | forest | 55% 木棍×1 / 30% 石子×1 | 你徒手在灌木丛里翻找…… |
 | hand | river | 65% 石子×1 | 你蹲在河滩上,盯着水流过的碎石…… |
 | stoneAxe | forest | 100% 木头×1 | 石斧劈进树干,木屑纷飞! |
-| hand | stoneAxe | (空,风味) | 这把石斧还没挂在任何目标上…… |
 | stoneAxe | river | (空) | 你挥斧砍水,只溅起一片水花。 |
 | stoneAxe | stone | (空) | 以石击石,火星四溅,但什么也没发生。 |
 | hand | stick | (空) | 木棍静静地躺着。 |
 | hand | stone | (空) | 石子静静地躺着。 |
 | hand | wood | (空) | 一段厚实的木料。 |
-| forest | stoneAxe | (空) | 森林「使用」石斧?这个挂法好像反了。 |
 
 `results: []` = 纯风味文本(不掷骰)。产出判定:`rollDrops` 顺序掷骰首个命中,
 全部未命中 → trigger 打"一无所获"。
@@ -97,8 +95,7 @@ src/content/xxx.ts ─────┘  registerContent 等     │   INTERACTION
   (一次 2 木头,maxProcess 2 同时两棵);
 - **篝火是世界侧合成台**(craft 行为,worldOnly,workMs 2500,
   maxProcess 2=材料位):挂矿石选「熔炼」配方(copperOre×1→铜锭×1)消耗熔炼;
-  craft 节点同样会被风车驱动(triggerNode 统一挂工作)——
-  「风车→篝火」= 自动熔炉(自动期间按当前选中配方);
+  craft 是玩家动作,只收空手 click(引擎规则)——驱动器驱动的是工具,不是它;
 - **驱动器**(auto-trigger,无 poweredBy 恒转):`windmill` 风车(5s,露天
   通用驱动器,不挑地方)、`totem` 图腾柱(8s,慢速驱动的奇观终点)——
   它们声明 worldOnly ⇒ 进不了背包,故只会在世界里运转(tick 也遍历背包树,
