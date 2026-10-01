@@ -96,22 +96,23 @@ minode/
 │  ├─ App.vue              # 布局壳 + 1s 游戏心跳 + 移动端边缘滑动 + 浮窗/抽屉/对话框
 │  ├─ content/             # 内容层:游戏内容的定义(经 api 注册,进版本库)
 │  │  ├─ index.ts     (7 行)   # 内容包挂载点:import 即注册
-│  │  └─ builtin.ts  (221 行)  # 内置内容包:开局全部节点/交互/配方
+│  │  ├─ builtin.ts  (209 行)  # 内置内容包:开局全部节点/交互/配方
+│  │  └─ bronze.ts   (244 行)  # 青铜时代内容包(山地/铜矿/篝火/铜器/风车/图腾)
 │  ├─ game/                # 纯逻辑层(不 import 任何组件)
 │  │  ├─ types.ts   (183 行)  # 数据模型与类型 + nodeCount/isStack/CATEGORY_LABELS
-│  │  ├─ icons.ts    (78 行)  # 图标注册中心:assets/icons/ 贴图自动注册 + lucide 显式表
-│  │  ├─ work.ts     (67 行)  # 工作系统:触发挂工作(时长/忙碌/到点结算),进度条数据源
+│  │  ├─ icons.ts    (91 行)  # 图标注册中心:assets/icons/ 贴图自动注册 + lucide 显式表
+│  │  ├─ work.ts     (96 行)  # 工作系统:click 工作表+计时循环+断链灰闪事件
 │  │  ├─ registry.ts (119 行) # 内容注册表(引擎容器:集合+put 原语+查询,全部 shallowReactive)
 │  │  ├─ tree.ts     (64 行)  # 树纯函数
 │  │  ├─ dnd.ts      (83 行)  # 拖拽 group 工厂 + onTreeAdd + DND_COMMON
-│  │  └─ api.ts     (137 行)  # 内容创作 API:注册+校验警告+registerContent 批量+validate 体检
+│  │  └─ api.ts     (144 行)  # 内容创作 API:注册+校验警告+registerContent 批量+validate 体检
 │  ├─ stores/
-│  │  ├─ game.ts    (943 行)  # 主 store:状态/守卫/全部游戏动作/存档(最大的文件)
+│  │  ├─ game.ts    (991 行)  # 主 store:状态/守卫/全部游戏动作/存档(最大的文件)
 │  │  └─ ui.ts       (28 行)  # 界面开关(不持久化)
 │  ├─ assets/icons/         # 像素贴图目录(美术丢文件即注册;内有 README)
 │  ├─ components/
 │  │  ├─ NodeBoard.vue (127)  # 节点面板基本组件(world/backpack 共用)
-│  │  ├─ NodeItem.vue  (461)  # 递归行节点(左侧身份触发按钮+拖拽+折叠+徽标+进度条)
+│  │  ├─ NodeItem.vue  (517)  # 递归行节点(左侧身份触发按钮+拖拽+折叠+徽标+进度条+灰闪+容器样式)
 │  │  ├─ NodeIcon.vue  (19)   # 图标(accent 着色;ICONS 见 game/icons.ts)
 │  │  ├─ CodexView.vue (172)  # 图鉴(分组)+ 上手指南
 │  │  ├─ Inspector.vue  (384)  # 检查器抽屉(「详情」按钮选中节点+操作)
@@ -138,15 +139,16 @@ import content 再跑存档校验与水合(内容缺席时节点会兜底成"未
 ┌─ TopBar:logo minode | [图鉴按钮] [⋯菜单:导出存档/导入存档/新的世界] ┐
 │                                                                    │
 │  NodeBoard(world,常驻)      ‖      NodeBoard(backpack,分屏)      │
-│  ─ 探索 ▾                        ‖  ─ 手工合成(配方·石斧)        │
-│    ─ 森林                        ‖  ─ 木头 ×22                    │
-│  ─ 背包(已开启)                 ‖      ─ 木头 ×4 … ⋯还有17个      │
+│  [(🧭 探索)] ⟵触发按钮,行底节拍条  ‖  [(🥣 手工合成)] 配方·石斧    │
+│    ─ 森林(点击行=折叠/展开)       ‖  ─ 木头 ×22(堆父=容器样式)    │
+│  [(🎒 背包)] 已开启               ‖      ─ 木头 ×4 … ⋯还有17个      │
 │  …                               ‖  …                             │
 ├─ StatusBar:已保存 | 世界 N | 物品 M | 时长 | ›最新日志 ────────────┤
 │  浮层:图鉴浮窗(右上)、检查器抽屉(右)、日志抽屉(下)、配方对话框   │
 ```
 
-- 背包分屏由世界里的「背包」节点点击开关(`ui.backpackOpen`)。
+- 每行 = [触发按钮(图标+名字)] … [⚙/⋯];点击行本身 = 折叠/展开(见 06 §3)。
+- 背包分屏由世界里的「背包」节点触发按钮开关(`ui.backpackOpen`)。
 - 图鉴是右上角浮窗(`ui.codexOpen`),非模态。
 - 移动端(<900px):左缘右滑开图鉴、右缘左滑开检查器;分屏变窄列。
 

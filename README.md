@@ -21,9 +21,11 @@
 ## 文档
 
 完整的架构与交接文档(数据模型、注册表、store、拖拽系统、组件、存档、
-扩展指南、测试方法、核心不变量、踩坑实录、词汇表、部署、视觉艺术指南):
+内容创作指南、测试方法、核心不变量、踩坑实录、词汇表、部署、
+视觉艺术指南、命名规范、AI 协作纪律):
 **[docs/](docs/README.md)** —— 改代码前请先读 [docs/10-invariants.md](docs/10-invariants.md)
-与 [docs/11-pitfalls.md](docs/11-pitfalls.md)。
+与 [docs/11-pitfalls.md](docs/11-pitfalls.md);提需求/写代码用词见
+[docs/15-naming.md](docs/15-naming.md) 与 [docs/16-ai-collaboration.md](docs/16-ai-collaboration.md)。
 
 ## 技术栈
 

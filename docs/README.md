@@ -19,6 +19,8 @@
 | [12-glossary.md](12-glossary.md) | 项目自造术语表 | 遇到黑话时 |
 | [13-deployment.md](13-deployment.md) | 部署与 CI:GitHub Pages、Actions 工作流、注意事项 | 发版/改仓库时 |
 | [14-visual-art.md](14-visual-art.md) | 视觉与艺术创作:图标/配色/行样式/动效的架构与改法、扩展新视觉钩子 | 改外观/加美术内容时 |
+| [15-naming.md](15-naming.md) | 开发名词规范:权威定名/禁用旧词/代码标识符约定/一致性自查 | 写代码、写文档、提需求前 |
+| [16-ai-collaboration.md](16-ai-collaboration.md) | AI 协作纪律:需求话术模板/执行红线/美术路径/完整示例 | 给 AI 提需求、AI 接活前 |
 
 ## 快速事实卡
 
