@@ -24,7 +24,7 @@ useIntervalFn(() => {
 onMounted(() => {
   if (!game.log.length) {
     game.pushLog("欢迎来到 minode。一切皆节点。", "info")
-    game.pushLog("点击「探索」节点寻找地形;点击「背包」节点开合背包分屏。", "info")
+    game.pushLog("点击「探索」节点左侧的按钮(图标+名字)寻找地形;点击节点行可以折叠/展开子树。", "info")
   }
 })
 

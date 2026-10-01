@@ -46,7 +46,7 @@
 ## I-6 permanent 不可移除;noChildren 无子列表
 
 - **位置**:`removeNodeById`(isPermanent 拒绝);NodeItem(noChildren 不渲染
-  twisty/子列表——没有列表就没有投放目标)。
+  子列表——没有列表就没有投放目标)。
 - **违反后果**:世界失去探索/背包节点 = 核心功能永久丢失(freshState 才能救回)。
 
 ## I-7 探索/合成按"发起节点"结算

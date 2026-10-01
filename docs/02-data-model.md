@@ -95,7 +95,7 @@ export interface NodeDef {
 | `accent` | string(css color) | NodeIcon/NodeItem | 视觉主色:图标+名称着色。**自定义节点材质的入口** |
 | `worldOnly` | boolean | `zonesOf()` | 仅世界。等价于 `zones: ["world"]`,是它的简写 |
 | `zones` | `NodeZone[]` | `zonesOf()→canPlaceInZone()` | 允许存在的区域,细粒度。如 bench `["backpack"]`。**缺省规则**:显式 zones 优先;否则 worldOnly→`["world"]`;否则全部区域。**拖拽守卫/收纳/放置/存档校验全部经 canPlaceInZone,勿绕过** |
-| `noChildren` | boolean | NodeItem | 不渲染 twisty 与子列表 = 不可挂子节点、不可折叠(背包节点)。"可被挂到其他节点上"不受影响 |
+| `noChildren` | boolean | NodeItem | 不渲染子列表 = 不可挂子节点、点击行也无折叠(背包节点)。"可被挂到其他节点上"不受影响 |
 | `maxStack` | number | stackLimit→canAbsorb/addItem/守卫 | 一堆同类物品最大件数(父+子)。缺省=∞。材料 64、石斧 1 |
 | `workMs` | number | triggerNode→startWork | 工作时长:触发后要做事多久才结算(期间忙碌+行底进度条)。缺省=store 的 DEFAULT_WORK_MS(1500);探索以 behavior.durationMs 为准 |
 | `maxProcess` | number | processLimit→拖拽守卫规则⑤ | 处理上限:世界区最多同时挂几个【直接】子节点(流程语义——斧子只面对它的树,不数子子节点)。缺省=∞。石斧 1 / 水车 2 / 河流 2 |

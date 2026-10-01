@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import { VueDraggable } from "vue-draggable-plus"
-import { ChevronRight, Settings2, Ellipsis, PanelRightOpen, PanelRightClose } from "lucide-vue-next"
+import { Settings2, Ellipsis, PanelRightOpen, PanelRightClose } from "lucide-vue-next"
 import { workOf } from "../game/work"
 import { DND_COMMON, onTreeAdd, setDragging, treeGroup } from "../game/dnd"
 import { getDef, getRecipe } from "../game/registry"
@@ -49,6 +49,8 @@ const isFunctional = computed(() => !!def.value.behavior)
 /** 视图开关节点(背包):点击开合分屏 */
 const isViewToggle = computed(() => def.value.behavior?.kind === "view-toggle")
 const noChildren = computed(() => !!def.value.noChildren)
+/** 展开态:有子节点且未折叠——触发按钮加细描边,补回无折叠箭头后的状态可见性 */
+const expanded = computed(() => hasChildren.value && !noChildren.value && !props.node.collapsed)
 /** 被占用:祖上有正在进行的工作(如石斧正在砍的森林)——半透明置灰,
  *  点击会被引擎拦下并提示;与 store 触发前置检查共用同一口径 */
 const occupied = computed(() =>
@@ -90,21 +92,28 @@ const workStyle = computed(() => {
   return { animationDuration: `${j.durationMs}ms`, animationDelay: `-${elapsed}ms` }
 })
 
-/** 点击:视图开关节点切换分屏;功能节点(按 behavior 分发)任何面板都触发;
- *  普通节点只在"世界"里触发(父触发子/空手),背包里无反应。
- *  触发 = 开始工作(行底进度条),到点才结算;忙碌中再点无效。
- *  点击不选中节点——selectedId 只由「详情/选择配方」按钮设置,联动检查器。 */
+/**
+ * 交互范式(用户明确要求):行 = 组织(拖拽 + 折叠),触发 = 左侧的显式按钮。
+ * 点击行本身只做折叠/展开——折叠与拖拽是同一类"整理树"的连续操作;
+ * 触发按钮就是节点的身份(图标 + 名字),按下即做事。
+ */
 function onRowClick() {
+  if (!noChildren.value) game.toggleCollapse(props.node.id)
+}
+
+/** 可触发 = 功能节点(按 behavior 分发)或世界面板里的普通节点;背包普通物品为静态身份块 */
+const canTrigger = computed(() => isFunctional.value || props.board === "world")
+
+/** 触发按钮:视图开关节点切换分屏;其余走 clickNode——
+ *  触发 = 开始工作(行底进度条),到点结算;忙碌/占用由引擎前置检查拦截。 */
+function onTriggerClick() {
   if (isViewToggle.value) {
     const view = def.value.behavior?.kind === "view-toggle" ? def.value.behavior.view : "backpack"
     if (view === "codex") ui.toggleCodex()
     else ui.toggleBackpack()
     return
   }
-  const clickable = isFunctional.value || props.board === "world"
-  if (clickable) {
-    game.clickNode(props.node.id)
-  }
+  game.clickNode(props.node.id)
 }
 
 function openInspector() {
@@ -127,23 +136,29 @@ function openRecipe() {
   >
     <div
       class="row-main"
-      :class="{ selected, occupied, functional: isFunctional, 'view-toggle': isViewToggle }"
+      :class="{ selected, occupied, expanded, functional: isFunctional, 'view-toggle': isViewToggle }"
       :style="def.accent ? { '--node-accent': def.accent } : undefined"
       @click="onRowClick"
     >
+      <!-- 节点身份 = 触发按钮(图标+名字):可触发的行按下即做事;
+           不可触发(背包普通物品)渲染为同构的静态块,保持列内对齐 -->
       <button
-        v-if="!noChildren"
-        class="twisty"
-        :class="{ invisible: !hasChildren }"
-        tabindex="-1"
-        @click.stop="game.toggleCollapse(node.id)"
+        v-if="canTrigger"
+        class="nt-id act-trigger"
+        :title="isViewToggle ? '开合面板' : '触发'"
+        @click.stop="onTriggerClick"
       >
-        <ChevronRight :size="13" :class="{ rotated: !node.collapsed }" />
+        <NodeIcon :type="node.type" :size="16" />
+        <span class="nt-name" :style="def.accent ? { color: def.accent } : undefined">
+          {{ def.name }}
+        </span>
       </button>
-      <NodeIcon :type="node.type" :size="16" />
-      <span class="nt-name" :style="def.accent ? { color: def.accent } : undefined">
-        {{ def.name }}
-      </span>
+      <div v-else class="nt-id">
+        <NodeIcon :type="node.type" :size="16" />
+        <span class="nt-name" :style="def.accent ? { color: def.accent } : undefined">
+          {{ def.name }}
+        </span>
+      </div>
       <span v-if="node.type === 'bench'" class="nt-sub">配方 · {{ benchRecipeName }}</span>
       <span v-if="isViewToggle" class="nt-sub view-state" :class="{ open: ui.backpackOpen }">
         <component :is="ui.backpackOpen ? PanelRightClose : PanelRightOpen" :size="12" />
@@ -251,31 +266,6 @@ function openRecipe() {
   font-weight: 700;
 }
 
-.twisty {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 17px;
-  height: 17px;
-  border: none;
-  background: transparent;
-  color: var(--fg-faint);
-  cursor: pointer;
-  padding: 0;
-  border-radius: 4px;
-  flex: none;
-}
-.twisty:hover {
-  color: var(--fg);
-  background: var(--active);
-}
-.twisty :deep(svg) {
-  transition: transform 0.12s;
-}
-.twisty .rotated {
-  transform: rotate(90deg);
-}
-
 .nt-name {
   color: var(--fg);
   white-space: nowrap;
@@ -356,6 +346,44 @@ function openRecipe() {
 .row-act:hover {
   background: var(--active);
   color: var(--fg);
+}
+
+/* 节点身份块:图标 + 名字。可触发的行它就是触发按钮(act-trigger)——
+   该类型 accent 色的极淡底胶囊(彩色图标/名字已有识别度,底色只做按钮
+   暗示,刻意淡)、悬停加深、按下微缩;高度取行高的 ~76%
+   (26px/34px,触屏 28px/40px)。展开着的行加一圈细描边,与折叠态区分
+   (没有折叠箭头后,这是"我开着"的视觉线索,配合缩进引导线/子数徽标)。 */
+.nt-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px 0 7px;
+  border-radius: 13px;
+  flex: none;
+}
+.act-trigger {
+  border: none;
+  background: color-mix(in srgb, var(--node-accent, var(--accent)) 6%, transparent);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: background 0.12s, transform 0.08s, box-shadow 0.12s;
+}
+.act-trigger:hover {
+  background: color-mix(in srgb, var(--node-accent, var(--accent)) 14%, transparent);
+}
+.act-trigger:active {
+  transform: scale(0.97);
+  background: color-mix(in srgb, var(--node-accent, var(--accent)) 17%, transparent);
+}
+.row-main.expanded .act-trigger {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--node-accent, var(--accent)) 22%, transparent);
+}
+@media (hover: none) {
+  .nt-id {
+    height: 28px;
+  }
 }
 
 /* 工作进度条:行底一条 2px 细线,从左向右匀速填满该类型自己的主色;

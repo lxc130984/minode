@@ -78,14 +78,27 @@ width:min(440px,94vw); max-height:76vh; z-index:60`,Transition `float`(透明度
 | `autoTrigger` | 该节点 def 的 `auto-trigger` 行为(非自触发节点 null) |
 | `autoReady` / `autoSub` | 自触发节点是否已就位(父级类型经 `findNode` 查)/ 副标题文案("每 3 秒驱动" / "需挂在河流下面") |
 
-### 点击分发 onRowClick()
+### 交互范式:行 = 组织,左侧触发按钮 = 做事(用户明确要求)
+
+**点击行本身 = 折叠/展开**(`onRowClick → toggleCollapse`;noChildren 节点了没反应)
+——折叠与拖拽是同一类"整理树"的连续手势,不和"做事"混在一起。
+没有折叠箭头:子数胶囊/×N 徽标承担"有子节点"的指示。
+
+**节点身份 = 触发按钮**(行最左侧的 `.nt-id.act-trigger`,图标+名字合一):
 
 ```
 view-toggle → 按 behavior.view 调 ui.toggleCodex()/toggleBackpack(),return(即时)
-clickable = isFunctional || board==="world"
-clickable → game.clickNode(node.id)   ← 触发 = 开始工作,行底进度条随之填充
-否则(背包里的普通节点)→ 无反应
+其余 → game.clickNode(node.id)   ← 触发 = 开始工作,行底进度条随之填充
 ```
+
+- 显隐 `canTrigger = isFunctional || board==="world"`;不可触发的行
+  (背包普通物品)渲染为同构的**静态** `.nt-id`(同 padding 对齐,无底色无指针);
+- 样式:accent 色 6% 极淡底胶囊(悬停 14%、按下 17%+scale .97),
+  高 26px(触屏 28px;≈行高 76%);**展开着的行**按钮加 inset 1px
+  accent 22% 细描边(`.row-main.expanded`)——无折叠箭头后"我开着"的
+  状态线索,配合缩进引导线与子数/×N 徽标;
+- `@click.stop` 防冒泡到行的折叠;按钮在拖拽手柄(.row-main)内,
+  按住拖动仍可拖(Sortable 的 3px 容差区分点击与拖拽)。
 
 **点击不选中**:节点是可拖动的按钮,没有选中态(用户明确要求);
 `selectedId` 只由行尾「详情 / 选择配方」按钮设置,用于联动检查器——
@@ -95,17 +108,17 @@ clickable → game.clickNode(node.id)   ← 触发 = 开始工作,行底进度�
 Map,Vue 按键追踪只触达本行)。有工作 → 行底渲染 `.work-track`(2px 细线,
 该类型 accent 色 85% 透明度),`animation-duration` 内联 = 剩余工作时间,
 CSS `scaleX(0→1)` 匀速填满,到点结算后随工作记录清除而消失。纯 CSS,
-无 JS 帧驱动;忙碌中再点由 store 拦截(warn"还在忙碌中"),不重启进度条。
+无 JS 帧驱动;忙碌中再触发由 store 前置检查拦截(warn"还在忙碌中")。
 
 ### 行内元素(从左到右)
 
-twisty(无子/无 noChildren 时隐藏)→ NodeIcon → 名称(def.accent 着色)→
+**触发按钮/身份块**(NodeIcon + 名称,def.accent 着色)→
 副标题(bench:配方·xx / view-toggle:已开启·已收起
 (带 PanelRight 图标,读 ui.backpackOpen)/ auto-trigger:每 N 秒驱动(cyan)或
 需挂在河流下面(orange)/ 普通节点:分类小标签)→
 flex 填充 → ×N 徽标(isItemStack)或子数胶囊(世界里声明了 maxProcess 的
-节点显示 N/M,如石斧 1/1、水车 2/2)→ 行尾按钮(bench 专属 ⚙ 选择配方;
-通用 ⋯ 详情打开检查器)→ 工作中:行底 `.work-track` 进度线。
+节点显示 N/M,如石斧 1/1、水车 2/2)→ ⚙ 选择配方(bench 专属)→
+⋯ 详情(检查器)→ 工作中:行底 `.work-track` 进度线。
 
 ### 子列表
 
@@ -158,7 +171,7 @@ accent 是自定义节点材质/配色的入口。
 - 特殊面板:explorer(状态/已发现地形)、bench(当前配方 + 选择配方按钮)、
   auto-trigger(驱动条件/驱动间隔/状态/驱动对象,如水车)、
   noChildren("这是一个开关节点,不能挂载子节点")。
-- 普通节点:子节点数、空手点击提示(findInteraction("hand", type)?.note)、
+- 普通节点:子节点数、空手触发提示(findInteraction("hand", type)?.note)、
   子节点清单("点击它 = 依次触发")或空提示。
 - 按钮显隐:收进背包 = `inWorld && canPlaceInZone(def.id,'backpack')`;
   放置到世界 = `!inWorld && canPlaceInZone(def.id,'world')`;

@@ -164,7 +164,7 @@ async function removeSelected() {
             </span>
           </div>
           <div class="stat-row">
-            <span class="k">空手点击</span>
+            <span class="k">空手触发</span>
             <span class="v">{{ handHint ?? "没有任何效果" }}</span>
           </div>
         </div>

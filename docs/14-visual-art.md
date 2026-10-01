@@ -188,18 +188,18 @@ accent 同时作用三处:
 NodeItem 的行(`.row-main`)从左到右:
 
 ```
-[twisty ▸] [NodeIcon] [名称] [副标题/分类标签] [flex填充] [×N徽标|子数胶囊] [⚙(bench)] [⋯]
+[(图标) 名称]=触发按钮/身份块  [副标题/分类标签] [flex填充] [×N徽标|子数胶囊] [⚙(bench)] [⋯]
 ```
 
 | 元素 | 类名 | 关键样式(scoped,NodeItem) |
 |---|---|---|
-| 行容器 | `.row-main` | 全宽、高 var(--row-h)、无边框、左 2px 透明边、圆角 7、user-select:none |
+| 行容器 | `.row-main` | 全宽、高 var(--row-h)、无边框、左 2px 透明边、圆角 7、user-select:none;点击=折叠/展开 |
 | 悬停/按下 | `:hover/:active` | `--hover`/`--active` 底色 |
 | 选中 | `.selected` | `--accent-soft` 底 + 左边框染 `--accent` |
 | 功能节点 | `.functional` | 名称 600 加粗 |
 | 视图开关 | `.view-toggle` | 名称 700 |
-| 折叠钮 | `.twisty` | 17px;`.rotated` 旋转 90°(transition .12s);无子时 `.invisible` |
-| 名称 | `.nt-name` | accent 内联着色;nowrap |
+| 触发按钮/身份块 | `.nt-id` / `.act-trigger` | 行最左侧,图标+名字合一:accent 6% 极淡底胶囊(悬停 14%、按下 17%+scale .97)、高 26px(触屏 28px,≈行高 76%);不可触发的行为同构静态块(同 padding 对齐,无底色);`.row-main.expanded` 时按钮加 inset 1px accent 22% 细描边(展开态线索) |
+| 名称 | `.nt-name` | accent 内联着色;nowrap(在身份块内) |
 | 副标题 | `.nt-sub` | 11px 淡色;`.view-state` 背包开合态;`.auto-state` 水车就位态 |
 | 分类标签 | `.nt-cat` + `.cat-xxx` | 10px;terrain 绿 / tool 紫 |
 | 堆徽标 | `.nt-pile` | `×N`(nodeCount),11px mono |
@@ -227,7 +227,7 @@ NodeItem 的行(`.row-main`)从左到右:
 | 动效 | 触发 | 实现 | 位置 |
 |---|---|---|---|
 | **工作进度条** work-track | 节点开始做事(触发挂上工作) | 行底 2px 细线,该类型 accent 色从左向右匀速填满,到点结算后消失 | NodeItem scoped keyframes;数据源 game/work.ts |
-| 折叠箭头旋转 | twisty | transform rotate 90°,0.12s | NodeItem scoped |
+| 触发按钮反馈 | .act-trigger | hover 加深/按下 scale .97;展开态 inset 细描边 | NodeItem scoped |
 | 行悬停渐变 | :hover | background transition 0.12s | NodeItem scoped |
 | 拖拽占位 | 拖动中 | `.sortable-ghost` opacity .35 | main.css |
 | 拖拽虚影 | fallback 拖动 | 库克隆 + CSS 微调(§5.4) | main.css |

@@ -358,7 +358,7 @@ export const useGameStore = defineStore("game", {
       this.$patch(freshState())
       clearAllWork() // 旧节点的工作随旧世界作废
       this.pushLog("一个崭新的世界展开了。", "info")
-      this.pushLog("点击「探索」节点寻找地形;点击「背包」节点开合背包分屏。", "info")
+      this.pushLog("点击「探索」节点左侧的按钮(图标+名字)寻找地形;点击节点行可以折叠/展开子树。", "info")
     },
 
     /**
