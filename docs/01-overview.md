@@ -85,25 +85,29 @@ minode/
 ├─ index.html              # 入口 HTML;含 window.__bootErrs 启动错误收集器(红条显示)
 ├─ vite.config.ts          # base=/minode/;dev server 1420 端口
 ├─ src/
-│  ├─ main.ts              # 启动顺序:ensureSaveIntegrity → pinia(+persist)→ EP → mount;DEV 暴露 window.__game / window.minode
+│  ├─ main.ts              # 启动顺序:内容注册(content/)→ ensureSaveIntegrity → pinia(+persist)→ EP → mount;DEV 暴露 window.__game / window.minode
 │  ├─ App.vue              # 布局壳 + 1s 游戏心跳 + 移动端边缘滑动 + 浮窗/抽屉/对话框
+│  ├─ content/             # 内容层:游戏内容的定义(经 api 注册,进版本库)
+│  │  ├─ index.ts     (7 行)   # 内容包挂载点:import 即注册
+│  │  └─ builtin.ts  (221 行)  # 内置内容包:开局全部节点/交互/配方
 │  ├─ game/                # 纯逻辑层(不 import 任何组件)
 │  │  ├─ types.ts   (183 行)  # 数据模型与类型 + nodeCount/isStack/CATEGORY_LABELS
 │  │  ├─ icons.ts    (78 行)  # 图标注册中心:assets/icons/ 贴图自动注册 + lucide 显式表
-│  │  ├─ work.ts     (56 行)  # 工作系统:触发挂工作(时长/忙碌/到点结算),进度条数据源
-│  │  ├─ registry.ts (280 行) # 内容注册表(全部 shallowReactive)
+│  │  ├─ work.ts     (67 行)  # 工作系统:触发挂工作(时长/忙碌/到点结算),进度条数据源
+│  │  ├─ registry.ts (119 行) # 内容注册表(引擎容器:集合+put 原语+查询,全部 shallowReactive)
 │  │  ├─ tree.ts     (64 行)  # 树纯函数
 │  │  ├─ dnd.ts      (83 行)  # 拖拽 group 工厂 + onTreeAdd + DND_COMMON
-│  │  └─ api.ts      (81 行)  # 运行时扩展 API
+│  │  └─ api.ts     (137 行)  # 内容创作 API:注册+校验警告+registerContent 批量+validate 体检
 │  ├─ stores/
-│  │  ├─ game.ts    (871 行)  # 主 store:状态/守卫/全部游戏动作/存档(最大的文件)
+│  │  ├─ game.ts    (943 行)  # 主 store:状态/守卫/全部游戏动作/存档(最大的文件)
 │  │  └─ ui.ts       (28 行)  # 界面开关(不持久化)
+│  ├─ assets/icons/         # 像素贴图目录(美术丢文件即注册;内有 README)
 │  ├─ components/
 │  │  ├─ NodeBoard.vue (127)  # 节点面板基本组件(world/backpack 共用)
-│  │  ├─ NodeItem.vue  (419)  # 递归行节点(渲染+拖拽+折叠+堆徽标+点击分发+工作进度条)
+│  │  ├─ NodeItem.vue  (461)  # 递归行节点(左侧身份触发按钮+拖拽+折叠+徽标+进度条)
 │  │  ├─ NodeIcon.vue  (19)   # 图标(accent 着色;ICONS 见 game/icons.ts)
 │  │  ├─ CodexView.vue (172)  # 图鉴(分组)+ 上手指南
-│  │  ├─ Inspector.vue  (375)  # 检查器抽屉(「详情」按钮选中节点+操作)
+│  │  ├─ Inspector.vue  (384)  # 检查器抽屉(「详情」按钮选中节点+操作)
 │  │  ├─ RecipeDialog.vue(161)# 配方选择(按 category 分组)
 │  │  ├─ LogConsole.vue (97)  # 日志面板
 │  │  ├─ TopBar.vue    (166)  # 品牌+图鉴开关+菜单(导出/导入/重置)
@@ -114,9 +118,12 @@ minode/
 └─ src-tauri/               # Tauri 壳(与网页逻辑无关)
 ```
 
-分层约定:`game/` 是纯逻辑(可被 store 与组件双向引用,但不引用组件);
+分层约定:`content/`(内容定义)→ `game/api.ts`(注册+校验)→ `game/registry.ts`
+(引擎容器)——内置与扩展同一条路;`game/` 其余是纯逻辑(不 import 组件);
 `stores/` 持有状态;`components/` 只消费 store 与 game/ 的导出。
-唯一例外:`dnd.ts` import 了 store(守卫需要读状态),属有意为之。
+两个有意例外:`dnd.ts` import 了 store(守卫要读状态);`main.ts` 必须先
+import content 再跑存档校验与水合(内容缺席时节点会兜底成"未知的节点",
+见 11 §6.5)。
 
 ## 6. 界面结构(当前)
 

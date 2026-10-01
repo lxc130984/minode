@@ -10,7 +10,7 @@ main.ts 在 `import.meta.env.DEV` 下暴露:
 | 钩子 | 内容 | 用途 |
 |---|---|---|
 | `window.__game` | game store 实例 | 直接读状态/调动作/调守卫 |
-| `window.minode` | 扩展 API 整体 | 运行时注册内容试玩 |
+| `window.minode` | 内容创作 API 整体 | 运行时注册内容试玩(注册即校验) |
 | `window.__bootErrs` | 启动错误数组 | index.html 注入的收集器;启动崩溃时页面顶部显示红条 |
 
 例:
@@ -18,7 +18,8 @@ main.ts 在 `import.meta.env.DEV` 下暴露:
 __game.addItem("wood", 70)          // 应产生 64 + 6 两堆
 __game.countItem("wood")
 __game.canDropIntoChildList(fakeEl, "backpack", ownerId)   // 守卫单元测试,见 §2
-minode.registerNode({…})
+minode.registerContent({ nodes: […], interactions: […] })  // 内容包试玩(见 08)
+minode.validate()                   // 全量体检:返回问题列表,空 = 健康
 ```
 
 ## 2. Store 层测试(推荐:确定性强)

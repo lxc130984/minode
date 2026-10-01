@@ -9,7 +9,7 @@
 
 ```
 ┌─ 第 1 层:数据(每个节点类型一份) ────────────────────────────┐
-│  registry.ts → NodeDef                                        │
+│  content/*.ts → NodeDef(经 game/api 注册)                    │
 │    icon:    "forest"     ← 图标键(指向 game/icons.ts 的 ICONS)│
 │    accent:  "#3d8b57"    ← 该类型的视觉主色(css color)       │
 │    category:"terrain"    ← 间接决定分类小标签的颜色类          │
@@ -65,7 +65,7 @@ src/assets/icons/charcoal.png  →  def 里 icon: "charcoal"
 ### 2.2 方法二:改用已有图标(最快)
 
 ```ts
-// registry.ts → NODE_DEFS 里对应 def
+// 内容包(src/content/)里对应 def 的 icon 字段
 { id: "wood", icon: "wood" → 改成 ICONS 里已有的任何键,如 "stick" }
 ```
 可用键 = ICONS 的键名(lucide:forest / river / stone / stick / stoneAxe /
@@ -262,7 +262,7 @@ store 触发(triggerNode)           game/work.ts                   NodeItem
   圆角;`pointer-events: none` 不挡拖拽手柄。
 
 想改观感:NodeItem scoped 的 `.work-track`(颜色/粗细/位置);
-节奏数值在 registry 的 `workMs`(见 03 §2.1)。
+节奏数值在内容包的 `workMs`(见 03 §2.1)。
 
 **未来扩展(同一数据源,引擎零改动)**:
 - 完成时的轻反馈:resolveWork 处订阅 endAt 清除瞬间做一次性小动效;
@@ -321,7 +321,7 @@ store 触发(triggerNode)           game/work.ts                   NodeItem
 // ① types.ts NodeDef 加字段
 glow?: boolean
 
-// ② registry.ts 给想要的 def 设 true(如 stoneAxe)
+// ② 内容包(src/content/)给想要的 def 设 true(如 stoneAxe)
 
 // ③ NodeItem.vue 行上绑类
 :class="{ …, 'has-glow': def.glow }"
@@ -360,13 +360,13 @@ glow?: boolean
 | 想改什么 | 去哪改 |
 |---|---|
 | 某物品图标 | 像素贴图:丢进 src/assets/icons/ 即注册,def.icon = 文件名(零代码);lucide:game/icons.ts(§2) |
-| 某节点颜色 | registry.ts → def.accent |
+| 某节点颜色 | 内容包(src/content/)→ def.accent |
 | 分类标签颜色 | NodeItem.vue scoped → `.nt-cat.cat-xxx` |
 | 全局配色/主题 | styles/main.css `:root` 调色板(+ body 背景 + EP 对齐) |
 | 行长相(卡片式/紧凑) | NodeItem.vue scoped → `.row-main` 及相邻规则 |
 | 选中态样式 | `.row-main.selected` |
 | 堆徽标/子数胶囊 | `.nt-pile` / `.nt-kids` |
-| 工作进度条 | NodeItem scoped `.work-track`(颜色/粗细);节奏数值 registry `workMs`;数据源 game/work.ts(§5.2) |
+| 工作进度条 | NodeItem scoped `.work-track`(颜色/粗细);节奏数值内容包 `workMs`;数据源 game/work.ts(§5.2) |
 | 拖拽虚影 | main.css `.sortable-fallback`(只微调,勿换机制) |
 | 拖拽重排速度 | dnd.ts DND_COMMON `animation` |
 | 图鉴浮窗动画 | App.vue `.float-*` 过渡类 |

@@ -32,6 +32,8 @@
 | 发号器 | uid | 节点 id 自增计数(newNodeId),校验要求 uid ≥ 已有 n<数字> 最大后缀 |
 | 新的世界 | reset | 重置存档(freshState);菜单入口 |
 | 图鉴 | Codex | 右上角浮窗:节点图鉴(按 category 分组、seen 点亮)+ 上手指南 |
+| 内容包 | ContentPack | 一批内容(nodes/interactions/recipes)的集合,`registerContent` 批量注册;内置内容(src/content/)与运行时扩展共用此形态 |
+| 体检 | validate | `minode.validate()`:全量检查图标引用/交互双方/配方材料是否都有着落,返回问题列表 |
 | 像素贴图 | asset icon | `src/assets/icons/` 下的图片文件,构建期经 import.meta.glob 自动注册为图标,键 = 文件名(去扩展名);同名覆盖 lucide 图标 |
 | 工作 | work | 一次"做事":触发可交互节点后挂上的一条记录 `{kind, endAt, durationMs, silent}`(game/work.ts,store 外不落盘);到点由 resolveWork 结算 |
 | 工作时长 | workMs | NodeDef 字段:做这件事要多久(缺省 1500ms;探索以 behavior.durationMs 为准) |

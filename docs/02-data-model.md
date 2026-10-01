@@ -17,7 +17,7 @@ export interface GameNode {
 | 字段 | 说明 |
 |---|---|
 | `id` | 形如 `"n<数字>"`,由 store 的 `newNodeId()` 发号(`n${++uid}`)。**全局唯一**,是 findNode/removeNode/selectedId/防环判定的键。存档校验要求 `uid ≥ 所有 id 的最大数字后缀`(防撞号)。 |
-| `type` | 指向 registry 里 `NodeDef.id`。未知 type 由 `getDef()` 返回兜底定义(见 03 §2.4)。 |
+| `type` | 指向注册表里 `NodeDef.id`(内容定义在 src/content/)。未知 type 由 `getDef()` 返回兜底定义(见 03 §1)。 |
 | `children` | 子节点数组。**必须始终是数组**——渲染层对"瞬态帧非数组"做了防御(NodeItem/Inspector 的 computed 兜底),但 store 层的所有路径都应保证这一点。 |
 | `collapsed` | 折叠态。`makeNode()` 造出默认 `true`(默认折叠);三个自动展开时机:①拖入子节点(onTreeAdd 中 `owner.collapsed=false`)②探索产出地形(finishExplore)③手工合成相关无需。**获得物品 addItem 不展开堆**(玩家折叠态保持,徽标显示总数——需求方明确要求)。 |
 

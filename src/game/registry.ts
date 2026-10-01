@@ -1,131 +1,62 @@
 /**
- * 游戏内容注册表:节点类型、交互规则、合成配方。
- * 新内容只需在这里(或通过 game/api.ts 运行时注册)追加定义,
- * 界面与引擎自动生效。
+ * 内容注册表(引擎侧):节点类型、交互规则、合成配方的运行时容器。
+ * 引擎与界面只认这里;内容(内置 src/content/ 或运行时扩展)统一经
+ * game/api.ts 注册进来——api 之上做校验,本文件只维护集合与索引一致性。
  *
- * 所有集合都是 shallowReactive:运行时注册(push/索引赋值)会立刻
- * 反映到消费它们的 computed 与组件渲染里。
+ * 所有集合都是 shallowReactive:注册(push/索引赋值)会立刻反映到
+ * 消费它们的 computed 与组件渲染里(图鉴分组/配方列表/图标)。
  */
 import { shallowReactive } from "vue"
 import type { Interaction, NodeDef, NodeZone, Recipe } from "./types"
 
-/** 全部节点类型定义 */
-export const NODE_DEFS: NodeDef[] = shallowReactive([
-  {
-    id: "explorer",
-    name: "探索",
-    category: "functional",
-    icon: "explorer",
-    worldOnly: true,
-    permanent: true,
-    accent: "#d08a3e",
-    desc: "点击它,等上几秒——有几率在它下面发现一片新的地形。它是世界的一部分,无法收进背包。",
-    behavior: {
-      kind: "explore",
-      durationMs: 5000,
-      successRate: 0.65,
-      pool: [
-        { type: "forest", weight: 0.65 },
-        { type: "river", weight: 0.35 },
-      ],
-    },
-  },
-  {
-    id: "backpackNode",
-    name: "背包",
-    category: "functional",
-    icon: "backpackNode",
-    worldOnly: true,
-    permanent: true,
-    noChildren: true,
-    accent: "#b98a2f",
-    desc: "点击它,在右侧开合背包分屏。它是一个开关:获得的物品都会进背包,把材料整堆拖到「手工合成」下面就能批量合成。",
-    behavior: { kind: "view-toggle", view: "backpack" },
-  },
-  {
-    id: "bench",
-    name: "手工合成",
-    category: "functional",
-    icon: "bench",
-    permanent: true,
-    zones: ["backpack"],
-    accent: "#8672bd",
-    workMs: 2000,
-    desc: "把材料节点挂到它下面,点击它就会按当前配方合成,产物自动进背包。它天然生成在背包里,方便整堆挂料、批量合成。",
-    behavior: { kind: "craft" },
-  },
-  {
-    id: "waterwheel",
-    name: "水车",
-    category: "functional",
-    icon: "waterwheel",
-    maxStack: 1,
-    maxProcess: 2,
-    accent: "#9c7b4a",
-    desc: "把它放到河流下面,水流会每 3 秒推动它一次,驱动挂在它下面的节点——比如石斧(最多同时驱动两个)。石斧下面再挂上森林,木头就会源源不断地流进背包。",
-    behavior: { kind: "auto-trigger", intervalMs: 3000, poweredBy: "river" },
-  },
-  {
-    id: "forest",
-    name: "森林",
-    category: "terrain",
-    icon: "forest",
-    worldOnly: true,
-    accent: "#3d8b57",
-    workMs: 3000,
-    desc: "一片郁郁葱葱的森林。空手翻找可以捡到木棍和石子;把石斧挂在它上面就能砍到木头。",
-  },
-  {
-    id: "river",
-    name: "河流",
-    category: "terrain",
-    icon: "river",
-    worldOnly: true,
-    accent: "#2f8f96",
-    workMs: 2500,
-    maxProcess: 2,
-    desc: "一条潺潺流淌的河。河滩上散落着被水冲刷圆润的石子;河上最多同时架起两台水车。",
-  },
-  {
-    id: "stick",
-    name: "木棍",
-    category: "material",
-    icon: "stick",
-    maxStack: 64,
-    desc: "枯枝断木。既是合成的材料,也可以摆成节点——虽然它自己并不会做什么。",
-  },
-  {
-    id: "stone",
-    name: "石子",
-    category: "material",
-    icon: "stone",
-    maxStack: 64,
-    desc: "一块称手的石头。是石器时代一切工具的起点。",
-  },
-  {
-    id: "wood",
-    name: "木头",
-    category: "material",
-    icon: "wood",
-    maxStack: 64,
-    desc: "用石斧砍下的木料。文明的基石,暂时先囤着。",
-  },
-  {
-    id: "stoneAxe",
-    name: "石斧",
-    category: "tool",
-    icon: "stoneAxe",
-    maxStack: 1,
-    maxProcess: 1,
-    accent: "#8672bd",
-    workMs: 2000,
-    desc: "石头绑上木棍制成的斧头。把它拖到世界,再把森林挂在它下面,点击它就会砍伐森林——它一次只对一棵树下手,想同时砍两棵就再造一把。",
-  },
-])
+/** 全部节点类型定义(经 registerNode 填充) */
+export const NODE_DEFS: NodeDef[] = shallowReactive([])
+export const DEF_MAP: Record<string, NodeDef> = shallowReactive({} as Record<string, NodeDef>)
 
-export const DEF_MAP: Record<string, NodeDef> = shallowReactive(
-  Object.fromEntries(NODE_DEFS.map((d) => [d.id, d])) as Record<string, NodeDef>,
+/** 交互规则表:source(可为 "hand")× target → 产出/风味 */
+export const INTERACTIONS: Interaction[] = shallowReactive([])
+export const INTERACTION_MAP: Record<string, Interaction> = shallowReactive(
+  {} as Record<string, Interaction>,
 )
+
+/** 合成配方 */
+export const RECIPES: Recipe[] = shallowReactive([])
+
+// ── 注册原语(api.ts 在其上做校验;也可直接用于无校验的热替换) ──
+
+/** 注册/覆盖一个节点类型(同 id 覆盖,维护 NODE_DEFS 与 DEF_MAP) */
+export function putNodeDef(def: NodeDef): void {
+  const existing = DEF_MAP[def.id]
+  if (existing) {
+    const idx = NODE_DEFS.indexOf(existing)
+    if (idx >= 0) NODE_DEFS[idx] = def
+  } else {
+    NODE_DEFS.push(def)
+  }
+  DEF_MAP[def.id] = def
+}
+
+/** 注册/覆盖一条交互(同 "source>target" 键覆盖) */
+export function putInteraction(interaction: Interaction): void {
+  const key = `${interaction.source}>${interaction.target}`
+  const existing = INTERACTION_MAP[key]
+  if (existing) {
+    const idx = INTERACTIONS.indexOf(existing)
+    if (idx >= 0) INTERACTIONS[idx] = interaction
+  } else {
+    INTERACTIONS.push(interaction)
+  }
+  INTERACTION_MAP[key] = interaction
+}
+
+/** 注册/覆盖一条配方(同 id 覆盖) */
+export function putRecipe(recipe: Recipe): void {
+  const idx = RECIPES.findIndex((r) => r.id === recipe.id)
+  if (idx >= 0) RECIPES[idx] = recipe
+  else RECIPES.push(recipe)
+}
+
+// ── 查询(引擎与界面的唯一口径) ──
 
 const ALL_ZONES: NodeZone[] = ["world", "backpack"]
 
@@ -159,104 +90,9 @@ export function canPlaceInZone(type: string, zone: NodeZone): boolean {
 /** 永久节点(不可移除) */
 export const isPermanent = (type: string): boolean => !!DEF_MAP[type]?.permanent
 
-/** 交互规则表:source(来源) + target(目标) => 产出 */
-export const INTERACTIONS: Interaction[] = shallowReactive([
-  {
-    source: "hand",
-    target: "forest",
-    results: [
-      { type: "stick", chance: 0.55, count: 1 },
-      { type: "stone", chance: 0.3, count: 1 },
-    ],
-    note: "你徒手在灌木丛里翻找……",
-  },
-  {
-    source: "hand",
-    target: "river",
-    results: [{ type: "stone", chance: 0.65, count: 1 }],
-    note: "你蹲在河滩上,盯着水流过的碎石……",
-  },
-  {
-    source: "stoneAxe",
-    target: "forest",
-    results: [{ type: "wood", chance: 1, count: 1 }],
-    note: "石斧劈进树干,木屑纷飞!",
-  },
-  // —— 风味描述(无产出) ——
-  {
-    source: "hand",
-    target: "stoneAxe",
-    results: [],
-    note: "这把石斧还没挂在任何目标上。把一个节点拖到它下面,再点击它试试。",
-  },
-  {
-    source: "stoneAxe",
-    target: "river",
-    results: [],
-    note: "你挥斧砍水,只溅起一片水花。",
-  },
-  {
-    source: "stoneAxe",
-    target: "stone",
-    results: [],
-    note: "以石击石,火星四溅,但什么也没发生。",
-  },
-  {
-    source: "hand",
-    target: "stick",
-    results: [],
-    note: "木棍静静地躺着。",
-  },
-  {
-    source: "hand",
-    target: "stone",
-    results: [],
-    note: "石子静静地躺着。",
-  },
-  {
-    source: "hand",
-    target: "wood",
-    results: [],
-    note: "一段厚实的木料。",
-  },
-  {
-    source: "forest",
-    target: "stoneAxe",
-    results: [],
-    note: "森林「使用」石斧?这个挂法好像反了。",
-  },
-])
-
-const INTERACTION_MAP: Record<string, Interaction> = shallowReactive(
-  Object.fromEntries(INTERACTIONS.map((i) => [`${i.source}>${i.target}`, i])) as Record<string, Interaction>,
-)
-export { INTERACTION_MAP }
-
 export function findInteraction(source: string, target: string): Interaction | undefined {
   return INTERACTION_MAP[`${source}>${target}`]
 }
-
-/** 合成配方 */
-export const RECIPES: Recipe[] = shallowReactive([
-  {
-    id: "stone-axe",
-    category: "石器",
-    inputs: [
-      { type: "stone", count: 3 },
-      { type: "stick", count: 2 },
-    ],
-    output: { type: "stoneAxe", count: 1 },
-  },
-  {
-    id: "water-wheel",
-    category: "木工",
-    inputs: [
-      { type: "wood", count: 4 },
-      { type: "stick", count: 2 },
-    ],
-    output: { type: "waterwheel", count: 1 },
-  },
-])
 
 export const getRecipe = (id: string): Recipe | undefined =>
   RECIPES.find((r) => r.id === id)

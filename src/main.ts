@@ -5,6 +5,10 @@ import ElementPlus from "element-plus"
 import zhCn from "element-plus/es/locale/lang/zh-cn"
 import "element-plus/dist/index.css"
 import "./styles/main.css"
+// 内容注册必须先于存档校验与 store 水合:
+// 内容缺席时 zonesOf 对未知类型 fail-open,存档虽不会被清,
+// 但节点会全部兜底成"未知的节点";若日后收紧 zonesOf,顺序就是硬约束
+import "./content"
 import App from "./App.vue"
 import { ensureSaveIntegrity } from "./stores/game"
 
