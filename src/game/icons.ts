@@ -23,6 +23,12 @@ import {
   Soup,
   Backpack,
   FerrisWheel,
+  Pickaxe,
+  Gem,
+  Coins,
+  Wind,
+  Flame,
+  Landmark,
 } from "lucide-vue-next"
 
 /** lucide 线条图标(显式声明) */
@@ -37,6 +43,13 @@ const LUCIDE_ICONS: Record<string, Component> = {
   bench: markRaw(Soup),
   backpackNode: markRaw(Backpack),
   waterwheel: markRaw(FerrisWheel),
+  mountain: markRaw(Mountain),
+  pickaxe: markRaw(Pickaxe),
+  gem: markRaw(Gem),
+  coins: markRaw(Coins),
+  wind: markRaw(Wind),
+  flame: markRaw(Flame),
+  landmark: markRaw(Landmark),
 }
 
 /** 把图片 URL 包成图标组件:<img class="px-icon"> 按 size 缩放,像素风渲染 */

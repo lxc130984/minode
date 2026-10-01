@@ -117,7 +117,7 @@ async function removeSelected() {
           <span class="v">{{ game.discovered.length ? game.discovered.map((t) => getDef(t).name).join("、") : "尚无" }}</span>
         </div>
       </div>
-      <div v-else-if="node.type === 'bench'" class="stat-box">
+      <div v-else-if="def?.behavior?.kind === 'craft'" class="stat-box">
         <div class="stat-row">
           <span class="k">当前配方</span>
           <span class="v">{{ benchRecipe ? getDef(benchRecipe.output.type).name : "未选择" }}</span>

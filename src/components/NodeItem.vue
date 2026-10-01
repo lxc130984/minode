@@ -57,8 +57,9 @@ const occupied = computed(() =>
   !!occupierOfWorkingAncestor(game.boardRoots(props.board), props.node),
 )
 
+const isCraft = computed(() => def.value.behavior?.kind === "craft")
 const benchRecipeName = computed(() => {
-  if (props.node.type !== "bench") return null
+  if (!isCraft.value) return null
   const r = getRecipe(game.selectedRecipeId)
   return r ? getDef(r.output.type).name : "未选择"
 })
@@ -159,7 +160,7 @@ function openRecipe() {
           {{ def.name }}
         </span>
       </div>
-      <span v-if="node.type === 'bench'" class="nt-sub">配方 · {{ benchRecipeName }}</span>
+      <span v-if="isCraft" class="nt-sub">配方 · {{ benchRecipeName }}</span>
       <span v-if="isViewToggle" class="nt-sub view-state" :class="{ open: ui.backpackOpen }">
         <component :is="ui.backpackOpen ? PanelRightClose : PanelRightOpen" :size="12" />
         {{ ui.backpackOpen ? "已开启" : "已收起" }}
@@ -176,7 +177,7 @@ function openRecipe() {
         {{ children.length }}{{ kidsMax ? `/${kidsMax}` : "" }}
       </span>
       <button
-        v-if="node.type === 'bench'"
+        v-if="isCraft"
         class="row-act"
         title="选择配方"
         @click.stop="openRecipe"

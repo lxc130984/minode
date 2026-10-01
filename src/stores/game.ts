@@ -278,7 +278,7 @@ function missingOf(state: ReturnType<typeof recipeStateOf>): string[] | null {
 }
 
 function craftMissingMsg(missing: string[]): string {
-  return `材料不足:${missing.join("、")}。把材料节点挂到「手工合成」下面再试。`
+  return `材料不足:${missing.join("、")}。把材料节点挂到合成台下面再试。`
 }
 
 /**

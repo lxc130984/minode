@@ -4,4 +4,5 @@
  * 美术资源走 src/assets/icons/(丢文件即注册),不需要动这里。
  */
 import "./builtin"
+import "./bronze"
 // import "./more-terrain"   // ← 未来的内容包按此挂载

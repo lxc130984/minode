@@ -83,6 +83,28 @@ src/content/xxx.ts ─────┘  registerContent 等     │   INTERACTION
   output: {type:"waterwheel",count:1} }
 ```
 
+### 2.4 内容包:青铜时代(src/content/bronze.ts)
+
+第二个内容包,演示纯内容扩展的完整姿势(零引擎改动):
+
+- **覆盖内置定义**:重新 registerNode explorer——产出池加入山地
+  (forest .5 / river .3 / mountain .2)。同 id 覆盖,图鉴顺序不变;
+- **新地形** `mountain` 山地(workMs 3000,maxProcess 2):
+  空手 70% 石子;石斧 25% 铜矿石(时代引导);铜镐 100% 铜矿石;
+- **材料**:`copperOre` 铜矿石(maxStack 32,氧化铜绿 accent)、
+  `copperIngot` 铜锭(maxStack 32);
+- **工具**:`copperPick` 铜镐(挖矿必得)、`copperAxe` 铜斧
+  (一次 2 木头,maxProcess 2 同时两棵);
+- **篝火是世界侧合成台**(craft 行为,worldOnly,workMs 2500,
+  maxProcess 2=材料位):挂矿石选「熔炼」配方(copperOre×1→铜锭×1)消耗熔炼;
+  craft 节点同样会被风车驱动(triggerNode 统一挂工作)——
+  「风车→篝火」= 自动熔炉(自动期间按当前选中配方);
+- **驱动器**(auto-trigger,无 poweredBy 恒转):`windmill` 风车(5s,露天
+  通用驱动器,不挑地方)、`totem` 图腾柱(8s,慢速驱动的奇观终点)——
+  它们声明 worldOnly ⇒ 进不了背包,故只会在世界里运转(tick 也遍历背包树,
+  这是内容层守卫而非引擎规则:新写无条件的 auto-trigger 节点时记得 worldOnly);
+- **配方组**:熔炼(矿→锭)、营地(篝火)、木工(+风车)、铜器(铜镐/铜斧)、奇观(图腾)。
+
 ## 3. 图标映射(在 src/game/icons.ts,不在此文件)
 
 ```ts
