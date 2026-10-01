@@ -11,32 +11,32 @@ export const useGameStore = defineStore("game", { state, getters, actions, persi
 
 ### 1.1 模块级导出(非 store 成员)
 
-| 导出 | 说明 |
-|---|---|
-| `SAVE_VERSION = 6` | 存档结构版本;不匹配的存档自动重置(迁移策略见 07) |
-| `SAVE_KEY = "game"` | localStorage 键(persist.key 与之共用) |
-| `gameNow: Ref<number>` | 游戏时钟(见 §1.4) |
-| `autoTriggerBehaviorOf(node)` | 取节点 def 声明的自触发行为;非自触发节点返回 null(组件用它判断"要不要显示驱动状态") |
-| `autoTriggerReady(b, parent)` | 自触发节点是否已就位:直接挂在 `poweredBy` 指定的类型下(缺省 = 恒就位)。**驱动判定与界面状态共用这一处口径** |
+| 导出                                     | 说明                                                                                                                                            |
+|------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| `SAVE_VERSION = 6`                       | 存档结构版本;不匹配的存档自动重置(迁移策略见 07)                                                                                                |
+| `SAVE_KEY = "game"`                      | localStorage 键(persist.key 与之共用)                                                                                                           |
+| `gameNow: Ref<number>`                   | 游戏时钟(见 §1.4)                                                                                                                               |
+| `autoTriggerBehaviorOf(node)`            | 取节点 def 声明的自触发行为;非自触发节点返回 null(组件用它判断"要不要显示驱动状态")                                                             |
+| `autoTriggerReady(b, parent)`            | 自触发节点是否已就位:直接挂在 `poweredBy` 指定的类型下(缺省 = 恒就位)。**驱动判定与界面状态共用这一处口径**                                     |
 | `occupierOfWorkingAncestor(roots, node)` | 节点是否被占用:沿祖先上行找有 interact/craft 工作进行的祖先(如石斧正在砍的森林),返回它或 null。**触发前置检查与 NodeItem 行置灰共用这一处口径** |
-| `BoardId = "world" \| "backpack"` | 面板标识;`boardRoots(board)` 返回对应根数组 |
-| `isSaveValid(saved)` | 存档深度校验(见 07 §2) |
-| `ensureSaveIntegrity()` | 启动时清掉不合规存档(main.ts 在 pinia 之前调用) |
+| `BoardId = "world" \| "backpack"`        | 面板标识;`boardRoots(board)` 返回对应根数组                                                                                                     |
+| `isSaveValid(saved)`                     | 存档深度校验(见 07 §2)                                                                                                                          |
+| `ensureSaveIntegrity()`                  | 启动时清掉不合规存档(main.ts 在 pinia 之前调用)                                                                                                 |
 
 ### 1.2 模块级私有函数(store 外的纯逻辑)
 
-| 函数 | 说明 |
-|---|---|
-| `stackLimit(type)` | `def.maxStack > 0 ? maxStack : Infinity` |
-| `processLimit(type)` | `def.maxProcess > 0 ? maxProcess : Infinity`(世界处理上限) |
-| (历史)stackRootOf/canAbsorb | 递归容量判定已随堆展平不变量退役,见 §2.4 与 11 §2.5 |
-| `findNodeByType(nodes, type)` | DFS 按类型找第一个 |
-| `takeNodes(list, type, n)` | **叶优先**移除 n 个同类节点,返回未满足数;移除父节点时其异类剩余子节点 splice 回上层原位置(不连带销毁) |
-| `recipeStateOf(selectedId, piles)` | 配方 × 材料状态:`{recipe, inputs:[{stack,have,ok}], craftable}` |
-| `countPiles(children)` | 统计子树材料 `type→件数`(每个同类节点计 1,与 takeNodes 消耗同口径;benchPiles getter / craft 预检与复核共用) |
-| `missingOf(state)` / `craftMissingMsg(missing)` | 配方缺料描述列表(state 无效为 null)/ "材料不足"日志文案的唯一来源 |
-| `exploreBehaviorOf(node)` | 取节点自身 def 的 explore 行为(非 explore 返回 null) |
-| `cycleAnnounced` | 模块级 Set(已播报"开始运转"的自触发节点 id);计时循环本身是工作表的 kind="cycle" 记录 |
+| 函数                                            | 说明                                                                                                        |
+|-------------------------------------------------|-------------------------------------------------------------------------------------------------------------|
+| `stackLimit(type)`                              | `def.maxStack > 0 ? maxStack : Infinity`                                                                    |
+| `processLimit(type)`                            | `def.maxProcess > 0 ? maxProcess : Infinity`(世界处理上限)                                                  |
+| (历史)stackRootOf/canAbsorb                     | 递归容量判定已随堆展平不变量退役,见 §2.4 与 11 §2.5                                                         |
+| `findNodeByType(nodes, type)`                   | DFS 按类型找第一个                                                                                          |
+| `takeNodes(list, type, n)`                      | **叶优先**移除 n 个同类节点,返回未满足数;移除父节点时其异类剩余子节点 splice 回上层原位置(不连带销毁)       |
+| `recipeStateOf(selectedId, piles)`              | 配方 × 材料状态:`{recipe, inputs:[{stack,have,ok}], craftable}`                                             |
+| `countPiles(children)`                          | 统计子树材料 `type→件数`(每个同类节点计 1,与 takeNodes 消耗同口径;benchPiles getter / craft 预检与复核共用) |
+| `missingOf(state)` / `craftMissingMsg(missing)` | 配方缺料描述列表(state 无效为 null)/ "材料不足"日志文案的唯一来源                                           |
+| `exploreBehaviorOf(node)`                       | 取节点自身 def 的 explore 行为(非 explore 返回 null)                                                        |
+| `cycleAnnounced`                                | 模块级 Set(已播报"开始运转"的自触发节点 id);计时循环本身是工作表的 kind="cycle" 记录                        |
 
 ### 1.3 state(全部字段)
 

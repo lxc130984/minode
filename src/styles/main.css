@@ -159,7 +159,9 @@ body {
 .sortable-fallback .child-list {
   display: none !important;
 }
-
+.sortable-fallback .work-track {
+    display: none !important;
+}
 /* ── 像素贴图图标(game/icons.ts 自动注册 assets/icons/ 下的图片) ── */
 .px-icon {
   image-rendering: pixelated;

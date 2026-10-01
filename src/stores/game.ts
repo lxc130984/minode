@@ -720,6 +720,13 @@ export const useGameStore = defineStore("game", {
      */
     normalizePile(pile: GameNode) {
       if (getDef(pile.type).behavior) return // 功能节点(合成台)的子级不限制
+      let root = pile
+      for (;;) {
+	const parent = findNode(this.backpack, root.id)?.parent
+	if (parent && parent.type === root.type) root = parent
+	else break
+      }
+      pile = root        // 之后原有逻辑全部不变,只是以 root 为整理对象
       const limit = stackLimit(pile.type)
       const items: GameNode[] = []
       const walk = (ns: GameNode[]) => {
