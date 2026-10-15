@@ -258,6 +258,30 @@
 .k-unknown {
   --ink-base: var(--hue-unknown);
 }
+
+/* ---------- 表达式括号（docs/08 D-29）：嵌套分组显形 + 拖拽把手 ----------
+   开括号在行首、闭括号收在子树尾（展开）或行内（折叠/空）；
+   颜色与返回值方括号同一色系（D-09），hover 反色暗示「可以拖」。 */
+.bracket {
+  color: color-mix(in oklab, var(--hue-bracket), #0b0b10 var(--dim));
+  cursor: grab;
+  user-select: none;
+  padding: 0 1px;
+}
+.bracket:hover {
+  background: #d6d6de;
+  color: #0b0b10;
+}
+.bracket-dots {
+  color: #55555e;
+  padding: 0 1px;
+  user-select: none;
+}
+/* 展开表达式的闭括号行：子树末尾的独立短行（紧凑，不占视觉重量） */
+.bracket-close-line {
+  line-height: 1;
+  padding: 0 0 1px;
+}
 /* 深度 → 亮度（越深越暗） */
 .node[data-depth='2'] {
   --dim: 8%;

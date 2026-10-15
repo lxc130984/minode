@@ -21,6 +21,10 @@ const hasChildren = computed(() => props.node.children.length > 0)
 /** 悬停标记（docs/06 §6.1）：被悬停节点的父节点加下划线 */
 const isHoveredParent = computed(() => store.isHoveredParent(props.node))
 
+/** 拖拽把手：chip + 开/闭括号（括号 = 整个表达式的把手，docs/08 D-29） */
+const DRAG_HANDLE = '.chip, .bracket-open, .bracket-close'
+const BRACKET_TITLE = '拖动 = 移动整个表达式（含全部实参）'
+
 function onDragStart(): void {
   store.setDragging(true)
 }
@@ -42,6 +46,16 @@ function onDragEnd(evt: DragEndLike): void {
       >
         {{ node.folded ? '[+]' : '[-]' }}
       </button>
+
+      <!-- 表达式的开括号：与 chip 一样是拖拽把手（拖 = 整棵子树） -->
+      <span
+        v-if="hasChildren"
+        class="bracket bracket-open"
+        :title="BRACKET_TITLE"
+        @mouseenter="store.setHover(node.id)"
+        @mouseleave="store.setHover(null)"
+        >(</span
+      >
 
       <button
         class="chip"
@@ -67,10 +81,18 @@ function onDragEnd(evt: DragEndLike): void {
         </template>
       </button>
 
-      <span v-if="node.folded" class="fold-badge">+{{ childCount }}</span>
+      <!-- 无实参（空表达式）或已折叠：闭括号收在行内（…+N 徽标） -->
+      <template v-if="hasChildren && node.folded">
+        <span class="bracket-dots">…</span>
+        <span class="fold-badge">+{{ childCount }}</span>
+      </template>
+      <span v-if="hasChildren && node.folded" class="bracket bracket-close" :title="BRACKET_TITLE"
+        >)</span
+      >
+
       <button
         class="recycle-btn"
-        title="回收（返还建造成本，子节点上移）"
+        title="回收（分解成原材料返还，子节点上移）"
         @click.stop="store.recycle(node.id)"
       >
         ×
@@ -83,7 +105,7 @@ function onDragEnd(evt: DragEndLike): void {
       class="kids"
       tag="div"
       :group="{ name: 'nodes' }"
-      handle=".chip"
+      :handle="DRAG_HANDLE"
       :animation="120"
       :empty-insert-threshold="8"
       :on-move="guardCycle"
@@ -92,5 +114,10 @@ function onDragEnd(evt: DragEndLike): void {
     >
       <TreeNode v-for="child in node.children" :key="child.id" :node="child" :depth="depth + 1" />
     </VueDraggable>
+
+    <!-- 展开时的闭括号：子树末尾的独立一行（也是拖拽把手；在 kids 容器之外，避免嵌套 Sortable 抢事件） -->
+    <div v-if="hasChildren && !node.folded" class="bracket-close-line">
+      <span class="bracket bracket-close" :title="BRACKET_TITLE">)</span>
+    </div>
   </div>
 </template>

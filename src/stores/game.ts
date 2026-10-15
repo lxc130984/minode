@@ -618,8 +618,10 @@ export const useGameStore = defineStore('game', () => {
 
   /**
    * 拖拽落位的**唯一入口**（只有树是可拖列表）：
-   * 指针落在侧栏（选择面板/背包）= 回收；否则按 SortableJS 计划做树内移动；
-   * 读不出意图 → 请求重建树视图（DOM 回到模型这一侧）。
+   * - 指针落在侧栏（选择面板/背包）= 回收；
+   * - **落点一律问指针**（`treeZoneAt`，D-29）：跨列表拖拽时原生 `drop` 事件可能不触发，
+   *   SortableJS 在 `end` 里报的 `to` 会退回源列表——plan 只用来确定**源**（源 DOM 不动，必然可靠）；
+   * - 读不出意图 → 请求重建树视图（DOM 回到模型这一侧）。
    */
   function handleDrop(evt: DragEndLike): void {
     dragging.value = false
@@ -632,7 +634,12 @@ export const useGameStore = defineStore('game', () => {
       recycle(plan.from.node)
       return
     }
-    if (!moveTreeNode(plan.from.node, plan.from.owner, plan.to.owner, plan.to.index)) {
+    // 落点权威（D-29）：**SortableJS 的 plan 优先**（树↔树都是普通 Sortable 容器，真实浏览器里
+    // drop 正常触发、to/index 可靠）；仅当 plan 说「哪儿也没去」（跨列表 drop 被取消时它会退回
+    // 源列表）而指针明显在另一个列表上时，才用指针落点兜底。
+    const zone = plan.to.owner === plan.from.owner ? (treeZoneAt(evt) ?? plan.to) : plan.to
+    const to = zone.owner !== plan.from.owner ? zone : plan.to
+    if (!moveTreeNode(plan.from.node, plan.from.owner, to.owner, to.index)) {
       requestTreeRebuild()
     }
   }

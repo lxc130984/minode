@@ -31,7 +31,7 @@ function onDragEnd(evt: DragEndLike): void {
       class="root-list"
       tag="div"
       :group="{ name: 'nodes' }"
-      handle=".chip"
+      handle=".chip, .bracket-open, .bracket-close"
       :animation="120"
       :empty-insert-threshold="30"
       :on-move="guardCycle"
