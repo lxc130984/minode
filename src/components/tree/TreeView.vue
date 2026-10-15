@@ -39,7 +39,13 @@ function onDragEnd(evt: DragEndLike): void {
       :on-start="onDragStart"
       :on-end="onDragEnd"
     >
-      <TreeNode v-for="node in store.roots" :key="node.id" :node="node" :depth="1" />
+      <TreeNode
+        v-for="node in store.roots"
+        :key="node.id"
+        :node="node"
+        :depth="1"
+        :is-head="true"
+      />
     </VueDraggable>
     <div v-if="store.panel" class="tree-dim" title="点击关闭面板" @click="store.closePanel()" />
   </main>

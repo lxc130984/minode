@@ -166,9 +166,9 @@
   color: #0b0b10;
 }
 
-/* ---------- 树（纵向大纲：每个节点一行，层级 = 缩进，D-28） ----------
-   同构于 Lisp 代码的 pretty-print：宽度 = 深度×21px + chip，几乎不会横向溢出；
-   纵向随页面滚动（拖拽靠 SortableJS 的窗口自动滚动，放置模式靠视觉层 rAF）。 */
+/* ---------- 树（Lisp 式渲染，D-30）：完全纵向大纲（emacs 风格，无层级竖线） ----------
+   每个表达式 = `( 头部` 一行 + 实参逐行缩进 21px/层 + 子树尾部闭括号行；
+   嵌套由「括号 + 缩进」表达（不用竖线）。 */
 .tree {
   margin-top: 10px;
 }
@@ -184,7 +184,7 @@
   color: #3c3c46;
 }
 .node {
-  position: relative; /* 空落点条/挤压指示线用绝对定位（不参与布局，拖拽时不回流） */
+  position: relative; /* 空落点条用绝对定位（不参与布局，拖拽时不回流） */
   padding: 1px 0;
 }
 .node-row {
@@ -192,54 +192,35 @@
   align-items: center;
   gap: 3px;
 }
-/* 子列表 = 悬挂缩进块（21px/层 + 层级竖线），**兄弟节点 inline 流式换行**（D-29）：
-   每个子节点是 inline-block 原子盒（整体拖拽/预览的最小单元），排满自动换行；
-   闭括号内联在最后一个实参后面（.kids-close）。 */
+/* 子列表 = 悬挂缩进块（21px/层，无竖线——括号就是嵌套的视觉边界），一实参一行 */
 .kids {
-  margin: 1px 0 1px 13px;
-  padding-left: 8px;
-  border-left: 1px solid var(--guide, #222229);
+  margin: 1px 0 1px 21px;
   min-height: 20px;
-}
-.kids > .node {
-  display: inline-block;
-  vertical-align: top;
-  margin: 1px 6px 1px 0;
-}
-.kids-close {
-  margin-right: 6px;
 }
 /* 空子列表：平时零尺寸（无噪声） */
 .kids:empty {
   min-height: 0;
   margin: 0;
-  padding-left: 0;
-  border-left-color: transparent;
 }
 /* 面板打开（树被锁定）时：落点条一律不显示 */
 .app.is-locked .kids:empty {
   position: static;
   min-height: 0;
   margin: 0;
-  padding-left: 0;
-  border-left-color: transparent;
 }
 
 /* 拖拽/放置模式中：空子列表变成「不参与布局」的落点条——绝对定位，因此不会引起回流/抖动；
-   不渲染任何提示文字，落点位置由拖拽预览 / place-gap 挤压本身表达（docs/06 §4.2）。
-   必须整体位于行下方：一旦节点被插入，本列表不再 :empty、落点条消失，
-   指针此刻落在被插入子节点的行上（属于本列表）——若落点条与行重叠，
-   指针会落回外层列表的行上，Sortable 会把节点再拽出去（嵌套失败）。 */
+   不渲染任何提示文字，落点位置由拖拽预览 / 放置 ghost 本身表达。
+   必须整体位于行下方：一旦节点被插入，本列表不再 :empty、落点条消失。 */
 .app.is-dragging .kids:empty,
 .app.is-placing .kids:empty {
   position: absolute;
   z-index: 1;
-  left: 13px;
+  left: 21px;
   right: 0;
   bottom: -8px;
   height: 8px;
-  padding-left: 8px;
-  border-left: 1px solid #2c2c36;
+  background: #1d1d24;
 }
 
 /* ---------- 语法高亮（docs/06 §2.1）：种类决定色相，深度只决定亮度 ---------- */
@@ -349,16 +330,23 @@
   text-decoration-color: #e6e6ea;
   text-underline-offset: 4px;
 }
-.fold {
-  color: #55555e;
-  padding: 0 1px;
-}
-.fold:hover {
-  color: #d6d6de;
-}
 .fold-badge {
   color: #55555e;
   font-size: 12px;
+}
+/* …+N 徽标 = 展开开关（D-30：无独立折叠按钮） */
+.fold-toggle {
+  cursor: pointer;
+  padding: 0 1px;
+}
+.fold-toggle:hover {
+  background: #d6d6de;
+  color: #0b0b10;
+}
+/* 展开表达式的闭括号行：子树末尾的独立短行（点击 = 折叠） */
+.bracket-close-line {
+  line-height: 1;
+  padding: 0 0 1px;
 }
 /* 回收按钮：× = 返还建造成本（docs/08 D-26），无门槛 */
 .recycle-btn {

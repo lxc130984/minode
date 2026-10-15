@@ -7,7 +7,15 @@ import type { GameNode } from '@/engine/types'
 import { useGameStore } from '@/stores/game'
 import type { DragEndLike } from '@/utils/tree-drop'
 
-const props = defineProps<{ node: GameNode; depth?: number }>()
+/**
+ * Lisp 式渲染（docs/06 §4，D-29/D-30）——完全纵向大纲（emacs 风格，无层级竖线）：
+ * - 每个表达式 = `( 头部` 一行 + 实参逐行缩进 21px + 子树尾部闭括号行；
+ * - **点击 = eval 解耦**（D-30）：`()` 表示 eval——只有自己构成表达式（有实参/函数/根层）
+ *   的节点点击才 eval 自己的 `(…)`；裸符号实参点击没有效果；
+ * - 折叠交互：**点 `)` 折叠（折叠后仍保留 `( …+N )` 的括号形态）、点 `…+N` 展开**；
+ * - 括号同时是拖拽把手（拖 = 移动整棵子表达式，D-29）。
+ */
+const props = defineProps<{ node: GameNode; depth?: number; isHead?: boolean }>()
 const store = useGameStore()
 
 const depth = computed(() => props.depth ?? 1)
@@ -18,14 +26,24 @@ const state = computed(() => store.chipState(props.node))
 const kind = computed(() => store.chipKind(props.node))
 const childCount = computed(() => store.foldBadgeOf(props.node))
 const hasChildren = computed(() => props.node.children.length > 0)
-/** 可调用（函数）：即使没有实参也是应用表达式 `( f )`，要括号；符号是原子，不要括号 */
+/** 可调用（函数）：即使没有实参也是应用表达式 `( f )`；符号是原子 */
 const isCallable = computed(() => kind.value === 'machine')
+const isHead = computed(() => props.isHead ?? false)
 /** 悬停标记（docs/06 §6.1）：被悬停节点的父节点加下划线 */
 const isHoveredParent = computed(() => store.isHoveredParent(props.node))
 
+/** 括号 = 表达式的边界（落单的头部也包，`()` 表示 eval，D-30） */
+const showBrackets = computed(() => hasChildren.value || isCallable.value || isHead.value)
+
 /** 拖拽把手：chip + 开/闭括号（括号 = 整个表达式的把手，docs/08 D-29） */
 const DRAG_HANDLE = '.chip, .bracket-open, .bracket-close'
-const BRACKET_TITLE = '拖动 = 移动整个表达式（含全部实参）'
+const BRACKET_DRAG_TITLE = '拖动 = 移动整个表达式（含全部实参）· 点击 = 折叠/保持折叠'
+
+const chipTitle = computed(() =>
+  showBrackets.value
+    ? '点击 = eval 本表达式（手持物作为隐式实参参与检测）'
+    : '实参（点击无效果；要 eval 它，把它包进自己的括号）',
+)
 
 function onDragStart(): void {
   store.setDragging(true)
@@ -35,36 +53,29 @@ function onDragStart(): void {
 function onDragEnd(evt: DragEndLike): void {
   store.handleDrop(evt)
 }
+
+/** 闭括号左键：放置模式下放行（冒泡给树区 = 建造）；否则 = 折叠/展开切换 */
+function onCloseClick(event: MouseEvent): void {
+  if (store.placing) return
+  event.stopPropagation()
+  store.toggleFold(props.node.id)
+}
 </script>
 
 <template>
   <div class="node" :data-node-id="node.id" :data-node-type="node.type" :data-depth="depth">
     <div class="node-row">
-      <button
-        v-if="hasChildren"
-        class="fold"
-        :title="node.folded ? '展开' : '折叠（折叠后不可拖入）'"
-        @click.stop="store.toggleFold(node.id)"
-      >
-        {{ node.folded ? '[+]' : '[-]' }}
-      </button>
-
-      <!-- 表达式的开括号：与 chip 一样是拖拽把手（拖 = 整棵子树） -->
-      <span v-if="isCallable || hasChildren" class="bracket bracket-open" :title="BRACKET_TITLE"
-        >(</span
-      >
+      <!-- 开括号（折叠时也在：折叠形态 = `( …+N )`，点击 = 折叠/保持） -->
+      <span v-if="showBrackets" class="bracket bracket-open" :title="BRACKET_DRAG_TITLE">(</span>
 
       <button
         class="chip"
         :class="[
           state === 'unknown' ? 'is-unknown' : state === 'idle' ? 'is-idle' : 'is-ok',
           `k-${kind}`,
-          {
-            pulse: store.isPulsing(node),
-            'is-hover-parent': isHoveredParent,
-          },
+          { pulse: store.isPulsing(node), 'is-hover-parent': isHoveredParent },
         ]"
-        title="点击 eval（放置模式时 = 建造；符号只作实参；手持物作为隐式实参参与检测）"
+        :title="chipTitle"
         @click="store.chipClick(node.id, $event)"
       >
         <span class="chip-name">{{ name }}</span>
@@ -76,16 +87,22 @@ function onDragEnd(evt: DragEndLike): void {
         </template>
       </button>
 
-      <!-- 已折叠 / 空函数：闭括号收在行内（…+N 徽标）；展开的闭括号在 kids 尾部内联 -->
-      <template v-if="hasChildren && node.folded">
+      <!-- 折叠态：…+N 徽标是展开开关，括号形态完整保留 -->
+      <template v-if="node.folded">
         <span class="bracket-dots">…</span>
-        <span class="fold-badge">+{{ childCount }}</span>
-        <span class="bracket bracket-close" :title="BRACKET_TITLE">)</span>
+        <button
+          class="fold-badge fold-toggle"
+          title="点击展开"
+          @click.stop="store.toggleFold(node.id)"
+        >
+          +{{ childCount }}
+        </button>
       </template>
       <span
-        v-else-if="isCallable && !hasChildren"
+        v-if="showBrackets && (node.folded || !hasChildren)"
         class="bracket bracket-close"
-        :title="BRACKET_TITLE"
+        title="点击 = 折叠/展开"
+        @click="onCloseClick"
         >)</span
       >
 
@@ -112,11 +129,18 @@ function onDragEnd(evt: DragEndLike): void {
       :on-start="onDragStart"
       :on-end="onDragEnd"
     >
-      <TreeNode v-for="child in node.children" :key="child.id" :node="child" :depth="depth + 1" />
-      <!-- 展开表达式的闭括号：kids 尾部内联（紧贴最后一个实参；draggable 只认 .node，括号不是列表项） -->
-      <span v-if="hasChildren" class="bracket bracket-close kids-close" :title="BRACKET_TITLE"
-        >)</span
-      >
+      <TreeNode
+        v-for="child in node.children"
+        :key="child.id"
+        :node="child"
+        :depth="depth + 1"
+        :is-head="false"
+      />
     </VueDraggable>
+
+    <!-- 展开表达式的闭括号：子树末尾的独立一行（点击 = 折叠） -->
+    <div v-if="hasChildren && !node.folded" class="bracket-close-line">
+      <span class="bracket bracket-close" :title="BRACKET_DRAG_TITLE" @click="onCloseClick">)</span>
+    </div>
   </div>
 </template>

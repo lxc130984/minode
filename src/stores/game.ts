@@ -572,14 +572,28 @@ export const useGameStore = defineStore('game', () => {
     return outcome
   }
 
-  /** chip 左键：放置模式 = 按指针落点建造（≠ eval）；否则 eval */
+  /**
+   * chip 左键（docs/02 §1，D-30）：
+   * - 放置模式 = 按指针落点建造（≠ eval）；
+   * - **eval 属于 `()`**：只有「自己构成一个表达式」的节点（有实参 / 函数 / 根层落单节点，
+   *   即渲染括号的那些）点击才 eval 该表达式；裸符号实参（无括号）点击没有效果。
+   */
   function chipClick(id: NodeId, event?: MouseEvent): void {
     if (placing.value && event) {
       event.stopPropagation() // 别再冒泡给树区点击（会重复建造）
       placeAt(event.clientX, event.clientY)
       return
     }
-    evalNode(id)
+    if (headsExpression(id)) evalNode(id)
+  }
+
+  /** 节点是否自己构成一个表达式（= 渲染括号 → 可点击 eval）：有实参 / 函数 / 根层 */
+  function headsExpression(id: NodeId): boolean {
+    const node = index.get(id)
+    if (!node) return false
+    if (node.children.length > 0) return true
+    if (registry.recipesFor(node.type).length > 0) return true // 函数：`( f )`
+    return (parentOf.get(id) ?? null) === null // 根层落单节点也包 `()`
   }
 
   function describeEval(node: GameNode, outcome: EvalOutcome): string {
@@ -934,6 +948,7 @@ export const useGameStore = defineStore('game', () => {
     // 动作：求值与点击
     evalNode,
     chipClick,
+    headsExpression,
     // 动作：建造（放置模式）
     startPlacing,
     cancelPlacing,

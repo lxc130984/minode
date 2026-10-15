@@ -70,6 +70,30 @@ describe('store 集成：点击求值（产出物品进背包）', () => {
     expect(held(store, 'iron')).toBe(before)
   })
 
+  it('点击语义（D-30）：`()` 才可 eval，裸符号实参点击无效果', () => {
+    const store = freshStore()
+    const mine = store.roots[0]
+    if (!mine) throw new Error('结构缺失')
+    const arg = mine.children[0] // 矿井的实参（铁矿石）——裸符号，无括号
+    if (!arg) throw new Error('结构缺失')
+
+    const before = held(store, 'iron_ore')
+    store.chipClick(arg.id) // 实参位 → 无效果
+    expect(held(store, 'iron_ore')).toBe(before)
+    expect(store.lastEval).toBe('')
+
+    store.chipClick(mine.id) // 头部（根层）→ eval
+    expect(held(store, 'iron_ore')).toBe(before + 1)
+    expect(store.lastEval).toContain('铁矿×1')
+
+    // 嵌套表达式的头部也可以 eval：发动机厂的第一个实参是装配台（头）
+    const assembler = findFirst(store, 'assembler')
+    if (!assembler) throw new Error('结构缺失')
+    const partsBefore = held(store, 'parts')
+    store.chipClick(assembler.id) // 装配台是发动机厂的头部实参 → eval
+    expect(held(store, 'parts')).toBe(partsBefore + 1)
+  })
+
   it('手持 = 选中背包物品：手持斧头点森林 → 木材（隐式实参）', () => {
     const store = freshStore()
     const forest = findFirst(store, 'forest')
