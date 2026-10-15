@@ -5,7 +5,13 @@ import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
 
 // https://vite.dev/config/
+// GitHub Pages 项目页部署在 /仓库名/ 子路径下（docs/05 §6）；
+// 本地开发与其它环境保持根路径。
+const repoName = process.env.GITHUB_REPOSITORY?.split('/')[1] ?? ''
+const isPages = process.env.GITHUB_PAGES === 'true' && repoName !== ''
+
 export default defineConfig({
+  base: isPages ? `/${repoName}/` : '/',
   staged: {
     '*': 'vp check --fix',
   },

@@ -1,0 +1,61 @@
+# 部署到 GitHub Pages：测试 → 构建 → 发布 dist/
+# 用法：仓库 Settings → Pages → Source 选「GitHub Actions」，然后推送 main/master 即可。
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint + format check
+        run: npm exec vp check
+
+      - name: Type check (vue-tsc)
+        run: npm exec vp run type-check
+
+      - name: Unit tests
+        run: npm exec vp test
+
+      - name: Build（项目页自动带 /仓库名/ base）
+        run: npm exec vp run build
+        env:
+          GITHUB_PAGES: 'true'
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

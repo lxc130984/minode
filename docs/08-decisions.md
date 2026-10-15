@@ -482,3 +482,17 @@ scrollSpeed`；放置模式由视觉层 rAF 循环驱动（指针停在树区边
 - **背景**：D-24~D-31 快速迭代后 store 成为上帝对象（首评即预警），术语表与实现漂移。
 - **代价**：store 组合了三个来源（本地 + display 展开 + feedback 命名挑选），
   `game.ts` 的 return 块需要注释标明来源。
+
+### D-33 文档全面重写 + GitHub Pages 自动部署
+
+- **决策**（2026-10-15）：
+  1. **docs 00-09 + 两份 README 按 D-31/D-32 现状彻底重写**（01 篇此前仍在讲节点背包/
+     v2 存档/求值通道；各篇累计了 D-24~D-31 的补丁层）。10 篇术语表刚在 D-32 重写，保留；
+     本篇（08）是 append-only 台账，只追加不重写。
+  2. **GitHub Pages 部署**：`.github/workflows/deploy.yml`——推送到 main/master 触发
+     check + type-check + test → `vp run build` → 发布 dist/；
+     `vite.config.ts` 以 `GITHUB_PAGES` + `GITHUB_REPOSITORY` 环境变量自动带
+     `/仓库名/` base（本地开发保持根路径）。
+- **背景**：快速迭代八轮决策后文档严重滞后于实现；用户要一个可分享的线上地址。
+- **代价**：文档从「演进记录」变为「现状快照」——演进史只在 08 篇；
+  Pages 项目页依赖仓库名子路径，改名仓库需同步检查 base。
