@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import { bagTotal } from '@/engine/bag'
 import { useGameStore } from '@/stores/game'
 import { fmt } from '@/utils/format'
 
@@ -17,7 +18,7 @@ const rows = computed(() =>
 <template>
   <div class="side-block">
     <span class="side-title">
-      背包 {{ fmt(store.bagTotal(store.bag)) }}/{{ store.registry.config.bagCapacity }}
+      背包 {{ fmt(bagTotal(store.bag)) }}/{{ store.registry.config.bagCapacity }}
     </span>
     <div class="bag-list">
       <div

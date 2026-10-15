@@ -24,7 +24,7 @@ const ANIM_MS = 120
 const name = computed(() => (store.placing ? store.nodeName(store.placing) : ''))
 const kind = computed(() => (store.placing ? store.chipKindOfType(store.placing) : 'symbol'))
 
-/** 落点 ghost：单个复用元素，插入 placingZone 指向的列表 */
+/** 落点 ghost：单个复用元素，插入 placingZone 指向的列表（setup 内创建，组件卸载即弃） */
 const ghost = document.createElement('div')
 ghost.className = 'chip place-ghost'
 ghost.title = '放置预览'

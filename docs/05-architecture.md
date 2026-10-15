@@ -39,9 +39,13 @@ src/
 │   ├── history.ts     # UndoTree（撤销树，纯逻辑）
 │   └── save.ts        # serialize / deserialize / v1→v2→v3 链式迁移
 ├── content/           # 唯一内容包（换目录 = 换游戏）
-│   ├── nodes.ts  resources.ts  recipes.ts  config.ts
+│   ├── nodes.ts  items.ts  recipes.ts  config.ts
+│   ├── demo.ts        # 示例局面/起始物资（内容 id 只出现在这里，D-32）
 │   └── index.ts       # export const CONTENT = buildRegistry({...})
-├── stores/game.ts     # 唯一 store
+├── stores/            # 单一 store（D-00 #6），按职责分文件（D-32）
+│   ├── game.ts        # store 主体：状态 + 树写入 + 求值路由 + 建造/回收 + 转移 + 历史/存档
+│   ├── display.ts     # 展示纯函数（只读注册表与节点；nameOf/retOf/chipKind/costTextOf…）
+│   └── feedback.ts    # 瞬态反馈（hint/pulse/悬停/括号配对/入场动画，按节点 id 分键）
 ├── components/
 │   ├── tree/TreeView.vue     # 根列表（拖拽容器 + 放置模式点击）
 │   ├── tree/TreeNode.vue     # 递归节点（chip / 折叠 / 子列表 / 挤压预览）

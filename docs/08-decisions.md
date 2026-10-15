@@ -463,3 +463,22 @@ scrollSpeed`；放置模式由视觉层 rAF 循环驱动（指针停在树区边
 - **背景**：用户实测反馈四条——开括号点不动、落点横线丑、要 emacs 的括号匹配与浅标线、
   放置/拖入节点「突然长出括号」没有过渡。
 - **代价**：纯视觉层新增三个瞬态状态（parenPairAt / appearAt / 落点槽 CSS），模型零变化。
+
+### D-32 架构整理：store 分层（display / feedback / content-demo），术语表全面对齐
+
+- **决策**（2026-10-15，纯重构，store 对外 API 与行为零变化，89 测试全绿）：
+  1. `stores/game.ts`（1045 行）拆出两个内聚模块，仍是**单一 Pinia store**（D-00 #6 不变）：
+     - `stores/display.ts`——展示**纯函数**层（nameOf/retOf/chipState/chipKind/nodeName/
+       itemName/itemHue/foldBadgeOf/costTextOf/recyclePreview/describeEval），只读注册表与节点；
+     - `stores/feedback.ts`——**瞬态反馈**层（hint/pulse/悬停父标记/括号配对高亮/入场标记），
+       全部按节点 id 分键，`clearAll()` 供读档/重置；
+     - store 主体降到 ~820 行（仍超 300 行预算：状态定义 + 六个写入域天然长，见 §10 修订）。
+  2. **内容 id 移出 store**：示例树（buildEngineFactory/三矿井+森林）、压力树、起始物资
+     移到 `content/demo.ts`——store 不再认识具体节点类型（内容与引擎分离的补课）。
+  3. 清理：`bagTotal` 冗余再导出（ItemBag 直接 import engine）、`headsExpression`/
+     `recyclePreview` 收回内部、`findNode` 仅测试使用（保留为引擎公共 API）。
+  4. `docs/10-glossary.md` 按 D-31 现状全面重写（括号/`()`-eval/手持/建造/回收词条更新，
+     废弃词表补「紧凑模式」）。
+- **背景**：D-24~D-31 快速迭代后 store 成为上帝对象（首评即预警），术语表与实现漂移。
+- **代价**：store 组合了三个来源（本地 + display 展开 + feedback 命名挑选），
+  `game.ts` 的 return 块需要注释标明来源。
