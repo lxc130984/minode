@@ -1,0 +1,96 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import { VueDraggable } from 'vue-draggable-plus'
+
+import { guardCycle } from '@/engine/dnd'
+import type { GameNode } from '@/engine/types'
+import { useGameStore } from '@/stores/game'
+import type { DragEndLike } from '@/utils/tree-drop'
+
+const props = defineProps<{ node: GameNode; depth?: number }>()
+const store = useGameStore()
+
+const depth = computed(() => props.depth ?? 1)
+const name = computed(() => store.nameOf(props.node))
+const ret = computed(() => store.retOf(props.node))
+const state = computed(() => store.chipState(props.node))
+/** 语法高亮分类（docs/06 §2.1） */
+const kind = computed(() => store.chipKind(props.node))
+const childCount = computed(() => store.foldBadgeOf(props.node))
+const hasChildren = computed(() => props.node.children.length > 0)
+/** 悬停标记（docs/06 §6.1）：被悬停节点的父节点加下划线 */
+const isHoveredParent = computed(() => store.isHoveredParent(props.node))
+
+function onDragStart(): void {
+  store.setDragging(true)
+}
+
+/** 落位全部交给 store：DOM 只作媒介，模型是唯一事实源（docs/05 §2.1） */
+function onDragEnd(evt: DragEndLike): void {
+  store.handleDrop(evt)
+}
+</script>
+
+<template>
+  <div class="node" :data-node-id="node.id" :data-node-type="node.type" :data-depth="depth">
+    <div class="node-row">
+      <button
+        v-if="hasChildren"
+        class="fold"
+        :title="node.folded ? '展开' : '折叠（折叠后不可拖入）'"
+        @click.stop="store.toggleFold(node.id)"
+      >
+        {{ node.folded ? '[+]' : '[-]' }}
+      </button>
+
+      <button
+        class="chip"
+        :class="[
+          state === 'unknown' ? 'is-unknown' : state === 'idle' ? 'is-idle' : 'is-ok',
+          `k-${kind}`,
+          {
+            pulse: store.isPulsing(node),
+            'is-hover-parent': isHoveredParent,
+          },
+        ]"
+        title="点击 eval（放置模式时 = 建造；符号只作实参；手持物作为隐式实参参与检测）"
+        @click="store.chipClick(node.id, $event)"
+        @mouseenter="store.setHover(node.id)"
+        @mouseleave="store.setHover(null)"
+      >
+        <span class="chip-name">{{ name }}</span>
+        <span v-if="store.panelOf(node)" class="chip-panel" title="可打开浮动窗口">▣</span>
+        <template v-if="ret !== null">
+          <span class="chip-bracket">[</span>
+          <span class="chip-ret">{{ ret }}</span>
+          <span class="chip-bracket">]</span>
+        </template>
+      </button>
+
+      <span v-if="node.folded" class="fold-badge">+{{ childCount }}</span>
+      <button
+        class="recycle-btn"
+        title="回收（返还建造成本，子节点上移）"
+        @click.stop="store.recycle(node.id)"
+      >
+        ×
+      </button>
+    </div>
+
+    <VueDraggable
+      v-if="!node.folded"
+      :model-value="node.children"
+      class="kids"
+      tag="div"
+      :group="{ name: 'nodes' }"
+      handle=".chip"
+      :animation="120"
+      :empty-insert-threshold="8"
+      :on-move="guardCycle"
+      :on-start="onDragStart"
+      :on-end="onDragEnd"
+    >
+      <TreeNode v-for="child in node.children" :key="child.id" :node="child" :depth="depth + 1" />
+    </VueDraggable>
+  </div>
+</template>

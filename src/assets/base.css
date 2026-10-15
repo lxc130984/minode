@@ -1,0 +1,35 @@
+/* 字符风基调：终端审美，详见 docs/06-ui-style.md */
+:root {
+  color-scheme: dark;
+  background: #0b0b10;
+  color: #b9b9c2;
+  font-family:
+    ui-monospace, 'Cascadia Code', 'Source Han Mono SC', 'Noto Sans Mono CJK SC', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  font-weight: normal;
+}
+
+html,
+body {
+  min-height: 100vh;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}

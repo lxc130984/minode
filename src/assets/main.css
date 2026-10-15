@@ -1,0 +1,483 @@
+@import './base.css';
+
+#app {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 12px 16px 40px;
+}
+
+/* ---------- 布局：左侧选择面板 + 背包，右侧主区 ---------- */
+.app {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.sidebar {
+  position: sticky;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.main {
+  position: relative; /* 浮动窗口（箱子）的定位锚点：docs/06 §8.1 */
+  flex: 1;
+  min-width: 0;
+}
+.side-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.side-title {
+  font-size: 11px;
+  color: #55555e;
+  white-space: nowrap;
+}
+
+/* ---------- 节点选择面板（docs/04 §2）：选中 = 进入放置模式（虚影） ---------- */
+.palette {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.palette-btn {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 3px;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--hue-machine);
+  text-align: left;
+}
+.palette-btn:hover {
+  background: #24242c;
+}
+.palette-btn.selected {
+  background: #d6d6de;
+  color: #0b0b10;
+}
+.palette-btn.is-unaffordable .p-name {
+  color: #6f6f7a;
+}
+.palette-btn.selected.is-unaffordable .p-name {
+  color: #0b0b10;
+}
+.p-cost {
+  color: #6f6f7a;
+  font-size: 12px;
+}
+.palette-btn.selected .p-cost {
+  color: #0b0b10;
+}
+.palette-hint {
+  font-size: 11px;
+  color: #e6b04f;
+}
+
+/* ---------- 背包 / 箱子：物品行（无槽位，docs/04 §3） ---------- */
+.bag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.bag-row {
+  display: flex;
+  gap: 6px;
+  white-space: nowrap;
+  cursor: pointer;
+  padding: 0 3px;
+}
+.bag-row:hover {
+  background: #24242c;
+}
+.bag-row.selected {
+  background: #d6d6de;
+  color: #0b0b10;
+}
+.bag-name {
+  color: inherit;
+}
+.bag-name.k-symbol {
+  color: var(--hue-symbol);
+}
+.bag-name.k-tool {
+  color: var(--hue-tool);
+}
+.bag-row.selected .bag-name,
+.bag-row.selected .bag-count {
+  color: #0b0b10;
+}
+.bag-count {
+  color: #6f6f7a;
+}
+.bag-empty {
+  color: #3a3a44;
+  font-size: 12px;
+}
+
+/* ---------- 放置模式（docs/04 §2）：完全复刻 vue-draggable 默认拖拽观感 ----------
+   光标 = 普通样式的 chip（拖拽影像）；落点 = 一个半透明 ghost **真实插入目标列表**，
+   兄弟节点自然挤开——与 SortableJS 的 sortable-ghost 插入预览一致，无自绘标记。 */
+.place-cursor {
+  position: fixed;
+  z-index: 40;
+  pointer-events: none;
+  opacity: 0.9;
+  --dim: 0%; /* .chip 的深度变量挂在 .node 上；这两个预览元素不在任何 .node 里 */
+}
+.place-ghost {
+  pointer-events: none;
+  opacity: 0.35; /* 与 .sortable-ghost 同款：半透明落位预览 */
+  --dim: 0%;
+}
+
+/* ---------- HUD ---------- */
+.hud {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #1d1d24;
+}
+.hud-title {
+  color: #f0f0f4;
+}
+.hud-held {
+  color: #cfcfd6;
+}
+.hud-msg {
+  color: #e6b04f;
+}
+.hud-hint {
+  color: #55555e;
+  font-size: 12px;
+}
+.text-btn {
+  color: #8a8a95;
+  padding: 0 3px;
+  white-space: nowrap;
+}
+.text-btn:hover {
+  background: #d6d6de;
+  color: #0b0b10;
+}
+
+/* ---------- 树（纵向大纲：每个节点一行，层级 = 缩进，D-28） ----------
+   同构于 Lisp 代码的 pretty-print：宽度 = 深度×21px + chip，几乎不会横向溢出；
+   纵向随页面滚动（拖拽靠 SortableJS 的窗口自动滚动，放置模式靠视觉层 rAF）。 */
+.tree {
+  margin-top: 10px;
+}
+.root-list {
+  min-height: 160px;
+  padding: 6px 8px;
+  border: 1px solid #1d1d24;
+}
+.root-list:empty::before {
+  content: 'empty';
+  display: block;
+  padding: 8px;
+  color: #3c3c46;
+}
+.node {
+  position: relative; /* 空落点条/挤压指示线用绝对定位（不参与布局，拖拽时不回流） */
+  padding: 1px 0;
+}
+.node-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+/* 子列表 = 纵向块级流：每个子节点占一行，缩进 21px/层 + 层级竖线 */
+.kids {
+  margin: 1px 0 1px 13px;
+  padding-left: 8px;
+  border-left: 1px solid var(--guide, #222229);
+  min-height: 20px;
+}
+/* 空子列表：平时零尺寸（无噪声） */
+.kids:empty {
+  min-height: 0;
+  margin: 0;
+  padding-left: 0;
+  border-left-color: transparent;
+}
+/* 面板打开（树被锁定）时：落点条一律不显示 */
+.app.is-locked .kids:empty {
+  position: static;
+  min-height: 0;
+  margin: 0;
+  padding-left: 0;
+  border-left-color: transparent;
+}
+
+/* 拖拽/放置模式中：空子列表变成「不参与布局」的落点条——绝对定位，因此不会引起回流/抖动；
+   不渲染任何提示文字，落点位置由拖拽预览 / place-gap 挤压本身表达（docs/06 §4.2）。
+   必须整体位于行下方：一旦节点被插入，本列表不再 :empty、落点条消失，
+   指针此刻落在被插入子节点的行上（属于本列表）——若落点条与行重叠，
+   指针会落回外层列表的行上，Sortable 会把节点再拽出去（嵌套失败）。 */
+.app.is-dragging .kids:empty,
+.app.is-placing .kids:empty {
+  position: absolute;
+  z-index: 1;
+  left: 13px;
+  right: 0;
+  bottom: -8px;
+  height: 8px;
+  padding-left: 8px;
+  border-left: 1px solid #2c2c36;
+}
+
+/* ---------- 语法高亮（docs/06 §2.1）：种类决定色相，深度只决定亮度 ---------- */
+:root {
+  --hue-machine: #e6b04f; /* 函数（有配方的类型） */
+  --hue-symbol: #5fc3a6; /* 符号（原子：结果 = 自身）/ 物品 */
+  --hue-tool: #b98fe0; /* 工具 */
+  --hue-unknown: #8a8a95; /* 未注册类型 */
+  --hue-ret: #94d47f; /* 结果 [..] */
+  --hue-warn: #e09a6a; /* 未解析 [?] */
+  --hue-bracket: #7c7c85; /* 方括号（中性：与值分色，D-09） */
+}
+.node {
+  --dim: 0%;
+  --guide: #2c2c36;
+}
+.chip.k-machine {
+  font-weight: 500; /* 函数名像编辑器里的关键字，给一点点字重 */
+}
+.k-symbol {
+  --ink-base: var(--hue-symbol);
+}
+.k-tool {
+  --ink-base: var(--hue-tool);
+}
+.k-unknown {
+  --ink-base: var(--hue-unknown);
+}
+/* 深度 → 亮度（越深越暗） */
+.node[data-depth='2'] {
+  --dim: 8%;
+  --guide: #26262e;
+}
+.node[data-depth='3'] {
+  --dim: 15%;
+  --guide: #212129;
+}
+.node[data-depth='4'] {
+  --dim: 22%;
+  --guide: #1d1d24;
+}
+.node[data-depth='5'] {
+  --dim: 28%;
+}
+.node[data-depth='6'],
+.node[data-depth='7'],
+.node[data-depth='8'],
+.node[data-depth='9'] {
+  --dim: 34%;
+}
+
+/* ---------- chip ---------- */
+.chip {
+  display: inline-flex;
+  white-space: nowrap;
+  padding: 0 3px;
+  --ink-base: var(--hue-unknown);
+  color: color-mix(in oklab, var(--ink-base), #0b0b10 var(--dim));
+  cursor: grab;
+}
+.chip-bracket {
+  color: color-mix(in oklab, var(--hue-bracket), #0b0b10 var(--dim));
+}
+.chip-ret {
+  color: color-mix(in oklab, var(--hue-ret), #0b0b10 var(--dim));
+}
+.chip:hover {
+  background: #d6d6de;
+  color: #0b0b10;
+}
+.chip:hover .chip-ret,
+.chip:hover .chip-bracket {
+  color: #0b0b10;
+}
+.chip.is-unknown,
+.chip.is-unknown .chip-ret,
+.chip.is-unknown .chip-bracket {
+  color: #8a8a95;
+}
+.chip.is-idle .chip-ret {
+  color: color-mix(in oklab, var(--hue-warn), #0b0b10 var(--dim));
+}
+
+/* ---------- 悬停标记（docs/06 §6.1）：只给被悬停节点的「父节点」加下划线 ---------- */
+.chip.is-hover-parent {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-color: #e6e6ea;
+  text-underline-offset: 4px;
+}
+.fold {
+  color: #55555e;
+  padding: 0 1px;
+}
+.fold:hover {
+  color: #d6d6de;
+}
+.fold-badge {
+  color: #55555e;
+  font-size: 12px;
+}
+/* 回收按钮：× = 返还建造成本（docs/08 D-26），无门槛 */
+.recycle-btn {
+  padding: 0 2px;
+  color: #6f6f7a;
+}
+.recycle-btn:hover {
+  color: #d6d6de;
+}
+
+/* ---------- 拖拽与反馈态 ---------- */
+.sortable-ghost {
+  opacity: 0.35;
+}
+.sortable-chosen > .node-row > .chip {
+  background: #2c2c36;
+}
+.chip.pulse {
+  animation: chip-pulse 0.35s ease-out;
+}
+@keyframes chip-pulse {
+  0% {
+    background: #d6d6de;
+    color: #0b0b10;
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* ---------- 历史（undo 树） ---------- */
+.history {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #55555e;
+}
+.history summary {
+  cursor: pointer;
+  color: #55555e;
+}
+.history-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 4px;
+  padding-top: 4px;
+}
+.history-step {
+  color: #8a8a95;
+}
+.history-step::after {
+  content: ' →';
+  color: #3a3a44;
+}
+.history-line > .history-step:last-child::after {
+  content: '';
+}
+.history-step.is-current {
+  color: #f0f0f4;
+  background: #1d1d24;
+}
+.history-label,
+.history-hint {
+  color: #3a3a44;
+}
+.text-btn:disabled {
+  color: #34343e;
+  cursor: default;
+}
+.text-btn:disabled:hover {
+  background: transparent;
+  color: #34343e;
+}
+
+/* ---------- debug ---------- */
+.debug {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #55555e;
+}
+.debug summary {
+  cursor: pointer;
+  color: #55555e;
+}
+.debug-row {
+  display: flex;
+  gap: 6px;
+  padding-top: 4px;
+}
+.debug-eval {
+  padding-top: 4px;
+  color: #6f6f7a;
+}
+
+/* ---------- 可点开暗示（带 panel 的节点 chip 尾部标记，docs/06 §3/§8.1） ---------- */
+.chip-panel {
+  margin-left: 2px;
+  color: #55555e;
+}
+
+/* ---------- 浮动窗口：箱子（docs/08 D-14 / docs/06 §8.1） ----------
+   主区左缘浮出，不铺满：左侧侧栏仍可见可操作。无圆角、无阴影。 */
+.tree-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: rgba(11, 11, 16, 0.62);
+  cursor: pointer;
+}
+.tree {
+  position: relative;
+}
+.panel-head {
+  cursor: move;
+  user-select: none;
+}
+.panel {
+  position: absolute;
+  top: 12px;
+  left: 0;
+  z-index: 20;
+  width: min(560px, 74%);
+  max-height: 60vh;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid #2c2c36;
+  background: rgba(11, 11, 16, 0.96);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.panel-title {
+  color: #f0f0f4;
+}
+.panel-hint {
+  color: #55555e;
+  font-size: 12px;
+}
+.panel-close {
+  margin-left: auto;
+  padding: 0 2px;
+  color: #6f6f7a;
+}
+.panel-close:hover {
+  color: #d6d6de;
+}
