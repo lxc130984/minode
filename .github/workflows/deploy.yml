@@ -22,25 +22,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      # 用 setup-vp 代替 setup-node：它会装好 vp CLI、Node，以及 devEngines 里
+      # 钉住的 npm 版本，并接管依赖缓存。之前 setup-node + npm ci 会因为 Node 24
+      # 自带 npm 11 与 devEngines 的 npm 12.2.0 冲突而报 EBADDEVENGINES。
+      # 注意：钉确切版本号，v1 浮动标签已冻结不再更新。
+      - uses: voidzero-dev/setup-vp@v1.21.2
         with:
-          node-version: 24
-          cache: npm
+          node-version: '24'
+          cache: true
 
       - name: Install dependencies
-        run: npm ci
+        run: vp install
 
       - name: Lint + format check
-        run: npm exec vp check
+        run: vp check
 
       - name: Type check (vue-tsc)
-        run: npm exec vp run type-check
+        run: vp run type-check
 
       - name: Unit tests
-        run: npm exec vp test
+        run: vp test
 
       - name: Build（项目页自动带 /仓库名/ base）
-        run: npm exec vp run build
+        run: vp run build
         env:
           GITHUB_PAGES: 'true'
 
