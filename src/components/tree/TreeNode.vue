@@ -18,6 +18,8 @@ const state = computed(() => store.chipState(props.node))
 const kind = computed(() => store.chipKind(props.node))
 const childCount = computed(() => store.foldBadgeOf(props.node))
 const hasChildren = computed(() => props.node.children.length > 0)
+/** 可调用（函数）：即使没有实参也是应用表达式 `( f )`，要括号；符号是原子，不要括号 */
+const isCallable = computed(() => kind.value === 'machine')
 /** 悬停标记（docs/06 §6.1）：被悬停节点的父节点加下划线 */
 const isHoveredParent = computed(() => store.isHoveredParent(props.node))
 
@@ -48,12 +50,7 @@ function onDragEnd(evt: DragEndLike): void {
       </button>
 
       <!-- 表达式的开括号：与 chip 一样是拖拽把手（拖 = 整棵子树） -->
-      <span
-        v-if="hasChildren"
-        class="bracket bracket-open"
-        :title="BRACKET_TITLE"
-        @mouseenter="store.setHover(node.id)"
-        @mouseleave="store.setHover(null)"
+      <span v-if="isCallable || hasChildren" class="bracket bracket-open" :title="BRACKET_TITLE"
         >(</span
       >
 
@@ -69,8 +66,6 @@ function onDragEnd(evt: DragEndLike): void {
         ]"
         title="点击 eval（放置模式时 = 建造；符号只作实参；手持物作为隐式实参参与检测）"
         @click="store.chipClick(node.id, $event)"
-        @mouseenter="store.setHover(node.id)"
-        @mouseleave="store.setHover(null)"
       >
         <span class="chip-name">{{ name }}</span>
         <span v-if="store.panelOf(node)" class="chip-panel" title="可打开浮动窗口">▣</span>
@@ -81,12 +76,16 @@ function onDragEnd(evt: DragEndLike): void {
         </template>
       </button>
 
-      <!-- 无实参（空表达式）或已折叠：闭括号收在行内（…+N 徽标） -->
+      <!-- 已折叠 / 空函数：闭括号收在行内（…+N 徽标）；展开的闭括号在 kids 尾部内联 -->
       <template v-if="hasChildren && node.folded">
         <span class="bracket-dots">…</span>
         <span class="fold-badge">+{{ childCount }}</span>
+        <span class="bracket bracket-close" :title="BRACKET_TITLE">)</span>
       </template>
-      <span v-if="hasChildren && node.folded" class="bracket bracket-close" :title="BRACKET_TITLE"
+      <span
+        v-else-if="isCallable && !hasChildren"
+        class="bracket bracket-close"
+        :title="BRACKET_TITLE"
         >)</span
       >
 
@@ -106,6 +105,7 @@ function onDragEnd(evt: DragEndLike): void {
       tag="div"
       :group="{ name: 'nodes' }"
       :handle="DRAG_HANDLE"
+      :draggable="'.node'"
       :animation="120"
       :empty-insert-threshold="8"
       :on-move="guardCycle"
@@ -113,11 +113,10 @@ function onDragEnd(evt: DragEndLike): void {
       :on-end="onDragEnd"
     >
       <TreeNode v-for="child in node.children" :key="child.id" :node="child" :depth="depth + 1" />
+      <!-- 展开表达式的闭括号：kids 尾部内联（紧贴最后一个实参；draggable 只认 .node，括号不是列表项） -->
+      <span v-if="hasChildren" class="bracket bracket-close kids-close" :title="BRACKET_TITLE"
+        >)</span
+      >
     </VueDraggable>
-
-    <!-- 展开时的闭括号：子树末尾的独立一行（也是拖拽把手；在 kids 容器之外，避免嵌套 Sortable 抢事件） -->
-    <div v-if="hasChildren && !node.folded" class="bracket-close-line">
-      <span class="bracket bracket-close" :title="BRACKET_TITLE">)</span>
-    </div>
   </div>
 </template>

@@ -32,6 +32,7 @@ function onDragEnd(evt: DragEndLike): void {
       tag="div"
       :group="{ name: 'nodes' }"
       handle=".chip, .bracket-open, .bracket-close"
+      :draggable="'.node'"
       :animation="120"
       :empty-insert-threshold="30"
       :on-move="guardCycle"

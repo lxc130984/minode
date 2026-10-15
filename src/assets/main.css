@@ -192,12 +192,22 @@
   align-items: center;
   gap: 3px;
 }
-/* 子列表 = 纵向块级流：每个子节点占一行，缩进 21px/层 + 层级竖线 */
+/* 子列表 = 悬挂缩进块（21px/层 + 层级竖线），**兄弟节点 inline 流式换行**（D-29）：
+   每个子节点是 inline-block 原子盒（整体拖拽/预览的最小单元），排满自动换行；
+   闭括号内联在最后一个实参后面（.kids-close）。 */
 .kids {
   margin: 1px 0 1px 13px;
   padding-left: 8px;
   border-left: 1px solid var(--guide, #222229);
   min-height: 20px;
+}
+.kids > .node {
+  display: inline-block;
+  vertical-align: top;
+  margin: 1px 6px 1px 0;
+}
+.kids-close {
+  margin-right: 6px;
 }
 /* 空子列表：平时零尺寸（无噪声） */
 .kids:empty {
@@ -276,11 +286,6 @@
   color: #55555e;
   padding: 0 1px;
   user-select: none;
-}
-/* 展开表达式的闭括号行：子树末尾的独立短行（紧凑，不占视觉重量） */
-.bracket-close-line {
-  line-height: 1;
-  padding: 0 0 1px;
 }
 /* 深度 → 亮度（越深越暗） */
 .node[data-depth='2'] {
