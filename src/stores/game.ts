@@ -37,6 +37,8 @@ export type ChipKind = 'machine' | 'symbol' | 'tool' | 'unknown'
 
 const PULSE_MS = 400
 const HINT_MS = 2600
+/** 入场动画时长（放置/拖入新表达式的「括号生长」，D-31） */
+const APPEAR_MS = 260
 /** 自动折叠的展示深度：第 1~2 层展开，更深的子树落地时默认折叠（+N 徽标，D-28） */
 const FOLD_DEPTH = 2
 
@@ -67,9 +69,14 @@ export const useGameStore = defineStore('game', () => {
   const dragging = ref(false)
   // 瞬态反馈按「节点 id → 值」分键存放：只有真正受影响的节点会重渲染
   const pulseAt = shallowReactive<Record<NodeId, boolean>>({})
+  // 入场动画（D-31）：刚放置/刚拖到新位置的表达式标记一拍，node-appear 播放「括号生长」
+  const appearAt = shallowReactive<Record<NodeId, true>>({})
+  let appearTimer: ReturnType<typeof setTimeout> | undefined
   // 悬停标记按节点分键：只标出「被悬停节点的父节点」，避免全树重渲染
   const hoverParentAt = shallowReactive<Record<NodeId, true>>({})
   let hoveredId: NodeId | null = null
+  // 括号配对高亮（emacs show-paren，D-31）：悬停某表达式的任一括号 → 该表达式 id
+  const parenPairAt = shallowRef<NodeId | null>(null)
   /** 最近一次点击的结果描述（调试面板展示） */
   const lastEval = ref('')
   /** 一次性操作提示（建造/回收/转移/背包满等），HUD 展示，超时自动清空 */
@@ -176,6 +183,28 @@ export const useGameStore = defineStore('game', () => {
 
   function isHoveredParent(node: GameNode): boolean {
     return hoverParentAt[node.id] === true
+  }
+
+  /** 括号配对高亮（D-31）：悬停表达式 X 的任一括号 → 传 X 的 id；离开传 null */
+  function setParenPair(id: NodeId | null): void {
+    parenPairAt.value = id
+  }
+
+  function isParenMatched(node: GameNode): boolean {
+    return parenPairAt.value === node.id
+  }
+
+  /** 入场动画标记（D-31）：刚放置/刚拖到新位置的表达式播放一次「括号生长」 */
+  function markAppearing(id: NodeId): void {
+    appearAt[id] = true
+    clearTimeout(appearTimer)
+    appearTimer = setTimeout(() => {
+      for (const key of Object.keys(appearAt)) delete appearAt[key]
+    }, APPEAR_MS)
+  }
+
+  function isAppearing(node: GameNode): boolean {
+    return appearAt[node.id] !== undefined
   }
 
   // ---------- undo 树（docs/07 §4.4） ----------
@@ -464,6 +493,7 @@ export const useGameStore = defineStore('game', () => {
     const node = createNode(type)
     target.splice(Math.min(Math.max(at, 0), target.length), 0, node)
     afterStructureChange([owner, node.id])
+    markAppearing(node.id)
     record(`建造 ${nameOf(node)}`)
     setHint(`建造 ${nameOf(node)} → ${owner === null ? '树根' : nameOf(index.get(owner) ?? node)}`)
     return true
@@ -626,6 +656,7 @@ export const useGameStore = defineStore('game', () => {
     target.splice(Math.min(Math.max(at, 0), target.length), 0, node)
     afterStructureChange([to, from])
     autoFoldDeep(nodeId) // 深处的大子树默认折叠，保持视图紧凑
+    markAppearing(nodeId)
     record('拖拽', true)
     return true
   }
@@ -973,6 +1004,9 @@ export const useGameStore = defineStore('game', () => {
     requestTreeRebuild,
     setDragging,
     setHover,
+    setParenPair,
+    isParenMatched,
+    isAppearing,
     // 动作：背包与箱子
     itemRowClick,
     itemRowDouble,

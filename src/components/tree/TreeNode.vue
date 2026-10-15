@@ -31,13 +31,15 @@ const isCallable = computed(() => kind.value === 'machine')
 const isHead = computed(() => props.isHead ?? false)
 /** 悬停标记（docs/06 §6.1）：被悬停节点的父节点加下划线 */
 const isHoveredParent = computed(() => store.isHoveredParent(props.node))
+/** 括号配对高亮（emacs show-paren，D-31）：悬停本表达式的任一括号 → 两端同时亮 */
+const parenMatched = computed(() => store.isParenMatched(props.node))
 
 /** 括号 = 表达式的边界（落单的头部也包，`()` 表示 eval，D-30） */
 const showBrackets = computed(() => hasChildren.value || isCallable.value || isHead.value)
 
 /** 拖拽把手：chip + 开/闭括号（括号 = 整个表达式的把手，docs/08 D-29） */
 const DRAG_HANDLE = '.chip, .bracket-open, .bracket-close'
-const BRACKET_DRAG_TITLE = '拖动 = 移动整个表达式（含全部实参）· 点击 = 折叠/保持折叠'
+const BRACKET_TITLE = '拖动 = 移动整个表达式（含全部实参）· 点击 = 折叠/展开'
 
 const chipTitle = computed(() =>
   showBrackets.value
@@ -54,8 +56,8 @@ function onDragEnd(evt: DragEndLike): void {
   store.handleDrop(evt)
 }
 
-/** 闭括号左键：放置模式下放行（冒泡给树区 = 建造）；否则 = 折叠/展开切换 */
-function onCloseClick(event: MouseEvent): void {
+/** 括号左键（开/闭对称）：放置模式下放行（冒泡给树区 = 建造）；否则 = 折叠/展开切换 */
+function onBracketClick(event: MouseEvent): void {
   if (store.placing) return
   event.stopPropagation()
   store.toggleFold(props.node.id)
@@ -63,10 +65,25 @@ function onCloseClick(event: MouseEvent): void {
 </script>
 
 <template>
-  <div class="node" :data-node-id="node.id" :data-node-type="node.type" :data-depth="depth">
+  <div
+    class="node"
+    :class="{ 'node-appear': store.isAppearing(node) }"
+    :data-node-id="node.id"
+    :data-node-type="node.type"
+    :data-depth="depth"
+  >
     <div class="node-row">
-      <!-- 开括号（折叠时也在：折叠形态 = `( …+N )`，点击 = 折叠/保持） -->
-      <span v-if="showBrackets" class="bracket bracket-open" :title="BRACKET_DRAG_TITLE">(</span>
+      <!-- 开括号（折叠时也在：折叠形态 = `( …+N )`）；点击 = 折叠/展开，悬停 = 配对高亮 -->
+      <span
+        v-if="showBrackets"
+        class="bracket bracket-open"
+        :class="{ 'bracket-matched': parenMatched }"
+        :title="BRACKET_TITLE"
+        @click="onBracketClick"
+        @mouseenter="store.setParenPair(node.id)"
+        @mouseleave="store.setParenPair(null)"
+        >(</span
+      >
 
       <button
         class="chip"
@@ -101,8 +118,11 @@ function onCloseClick(event: MouseEvent): void {
       <span
         v-if="showBrackets && (node.folded || !hasChildren)"
         class="bracket bracket-close"
-        title="点击 = 折叠/展开"
-        @click="onCloseClick"
+        :class="{ 'bracket-matched': parenMatched }"
+        :title="BRACKET_TITLE"
+        @click="onBracketClick"
+        @mouseenter="store.setParenPair(node.id)"
+        @mouseleave="store.setParenPair(null)"
         >)</span
       >
 
@@ -140,7 +160,15 @@ function onCloseClick(event: MouseEvent): void {
 
     <!-- 展开表达式的闭括号：子树末尾的独立一行（点击 = 折叠） -->
     <div v-if="hasChildren && !node.folded" class="bracket-close-line">
-      <span class="bracket bracket-close" :title="BRACKET_DRAG_TITLE" @click="onCloseClick">)</span>
+      <span
+        class="bracket bracket-close"
+        :class="{ 'bracket-matched': parenMatched }"
+        :title="BRACKET_TITLE"
+        @click="onBracketClick"
+        @mouseenter="store.setParenPair(node.id)"
+        @mouseleave="store.setParenPair(null)"
+        >)</span
+      >
     </div>
   </div>
 </template>

@@ -192,35 +192,42 @@
   align-items: center;
   gap: 3px;
 }
-/* 子列表 = 悬挂缩进块（21px/层，无竖线——括号就是嵌套的视觉边界），一实参一行 */
+/* 子列表 = 悬挂缩进块（21px/层）+ 极浅缩进标线（编辑器惯例：低对比度，D-31） */
 .kids {
-  margin: 1px 0 1px 21px;
+  margin: 1px 0 1px 13px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(230, 230, 234, 0.055);
   min-height: 20px;
 }
 /* 空子列表：平时零尺寸（无噪声） */
 .kids:empty {
   min-height: 0;
   margin: 0;
+  padding-left: 0;
+  border-left-color: transparent;
 }
-/* 面板打开（树被锁定）时：落点条一律不显示 */
+/* 面板打开（树被锁定）时：落点槽一律不显示 */
 .app.is-locked .kids:empty {
   position: static;
   min-height: 0;
   margin: 0;
+  padding-left: 0;
+  border-left-color: transparent;
 }
 
-/* 拖拽/放置模式中：空子列表变成「不参与布局」的落点条——绝对定位，因此不会引起回流/抖动；
-   不渲染任何提示文字，落点位置由拖拽预览 / 放置 ghost 本身表达。
-   必须整体位于行下方：一旦节点被插入，本列表不再 :empty、落点条消失。 */
+/* 拖拽/放置模式中：空子列表展开一个「幽灵实参槽」（虚线框，chip 同款比例，D-31）——
+   绝对定位不参与布局（不回流），位于行下方；一旦节点插入，列表不再 :empty、槽消失。 */
 .app.is-dragging .kids:empty,
 .app.is-placing .kids:empty {
   position: absolute;
   z-index: 1;
-  left: 21px;
-  right: 0;
-  bottom: -8px;
-  height: 8px;
-  background: #1d1d24;
+  left: 13px;
+  bottom: -9px;
+  width: 76px;
+  height: 18px;
+  padding-left: 8px;
+  border: 1px dashed #3a3a44;
+  background: rgba(11, 11, 16, 0.55);
 }
 
 /* ---------- 语法高亮（docs/06 §2.1）：种类决定色相，深度只决定亮度 ---------- */
@@ -262,6 +269,11 @@
 .bracket:hover {
   background: #d6d6de;
   color: #0b0b10;
+}
+/* 配对高亮（emacs show-paren，D-31）：悬停任一端 → 两端同时亮（暗色块，不抢 hover 反色） */
+.bracket-matched {
+  background: #2c2c36;
+  color: #e6e6ea;
 }
 .bracket-dots {
   color: #55555e;
@@ -363,6 +375,20 @@
 }
 .sortable-chosen > .node-row > .chip {
   background: #2c2c36;
+}
+/* 入场动画（D-31）：放置/拖入新表达式时「括号生长」——整式淡入下沉，
+   闭括号行额外从上方滑入（读作「括号合上」） */
+@keyframes node-appear {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+.node-appear {
+  animation: node-appear 180ms ease-out;
+}
+.node-appear > .bracket-close-line {
+  animation: node-appear 240ms ease-out;
 }
 .chip.pulse {
   animation: chip-pulse 0.35s ease-out;
