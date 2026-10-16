@@ -41,11 +41,12 @@ const showBrackets = computed(() => hasChildren.value || isCallable.value || isH
 const DRAG_HANDLE = '.chip, .bracket-open, .bracket-close'
 const BRACKET_TITLE = '拖动 = 移动整个表达式（含全部实参）· 点击 = 折叠/展开'
 
-const chipTitle = computed(() =>
-  showBrackets.value
+const chipTitle = computed(() => {
+  const base = showBrackets.value
     ? '点击 = eval 本表达式（手持物作为隐式实参参与检测）'
-    : '实参（点击无效果；要 eval 它，把它包进自己的括号）',
-)
+    : '实参（点击无效果；要 eval 它，把它包进自己的括号）'
+  return store.isHeldHint(props.node) ? `${base} · 手持可命中（虚线提示，点击必得）` : base
+})
 
 function onDragStart(): void {
   store.setDragging(true)
@@ -99,7 +100,9 @@ function onBracketClick(event: MouseEvent): void {
         <span v-if="store.panelOf(node)" class="chip-panel" title="可打开浮动窗口">▣</span>
         <template v-if="ret !== null">
           <span class="chip-bracket">[</span>
-          <span class="chip-ret">{{ ret }}</span>
+          <span class="chip-ret" :class="{ 'is-held-hint': store.isHeldHint(node) }">{{
+            ret
+          }}</span>
           <span class="chip-bracket">]</span>
         </template>
       </button>

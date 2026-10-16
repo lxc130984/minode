@@ -78,7 +78,9 @@ export function findRecipe(registry, node, held = null): RecipeDef | undefined {
 - 手持对 ordered 配方同样排最前（可补首位实参）；
 - 内容侧零代码：「手持斧头点森林得木材」就是一条配方数据
   `{ at: 'forest', args: [{ item: 'axe' }], out: [{ item: 'wood' }] }`；
-- 静态显示仍为 `[?]`（空手语义）——手持命中是点击时的加成，不改变显示承诺。
+- **手持可命中提示（D-34）**：静态显示按空手语义，但当手持物能命中时，`retOf` 以
+  **预测产物**替代 `[?]` 并加虚线下划线（`.is-held-hint`）——显示与点击共用
+  `findRecipe`，**看到什么就点什么得什么**；放下手持回到 `[?]`，结构与手持的区分保留。
 
 ## 4. 配方检测（静态）
 

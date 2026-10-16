@@ -245,7 +245,7 @@ export function starterSeeds(): [ItemId, Decimal][]
 
 **展示（display.ts 纯函数）**：`nameOf` / `retOf` / `chipState` / `chipKind` /
 `chipKindOfType` / `nodeName` / `itemName` / `itemHue` / `foldBadgeOf` / `costTextOf` /
-`recyclePreview` / `describeEval`。
+`recyclePreview` / `describeEval` / `isHeldHint`（手持可命中提示，`retOf` 绑定 `heldItem`，D-34）。
 
 **瞬态（feedback.ts）**：`hint` / `setHint` / `isPulsing` / `isHoveredParent` /
 `setParenPair` / `isParenMatched` / `isAppearing`。

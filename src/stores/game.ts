@@ -813,6 +813,9 @@ export const useGameStore = defineStore('game', () => {
     reset,
     // 展示（stores/display.ts）与瞬态反馈（stores/feedback.ts）
     ...display,
+    // retOf/isHeldHint 绑定手持（D-34）：heldItem 变化 → 全树预测产物提示自动刷新
+    retOf: (node: GameNode) => display.retOf(node, heldItem.value),
+    isHeldHint: (node: GameNode) => display.isHeldHint(node, heldItem.value),
     hint: feedback.hint,
     setHint: feedback.setHint,
     isPulsing: feedback.isPulsing,

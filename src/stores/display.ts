@@ -4,8 +4,8 @@ import { costEntries, recycleRefund, type DecomposeCtx } from '@/engine/bag'
 import { D, type Decimal } from '@/engine/num'
 import type { NodeRegistry } from '@/engine/registry'
 import type { ChipKind } from '@/stores/game'
-import type { EvalOutcome } from '@/engine/eval'
-import type { GameNode, ItemId, NodeTypeId } from '@/engine/types'
+import { findRecipe, type EvalOutcome } from '@/engine/eval'
+import type { GameNode, ItemId, NodeTypeId, Yield } from '@/engine/types'
 
 /**
  * 展示辅助层（docs/07 §4.3）：**纯函数**——只读注册表与节点，不触碰任何可变状态。
@@ -27,23 +27,47 @@ export function createDisplayHelpers(registry: NodeRegistry) {
     return registry.node(node.type)?.name ?? '?'
   }
 
-  /** `[]` 里的文本：null = 不显示方括号；'?' = 配方检测不通过 */
-  function retOf(node: GameNode): string | null {
-    const def = registry.node(node.type)
-    if (!def) return null
-    const policy = def.retDisplay ?? 'auto'
-    if (policy === 'never') return null
-    if (node.ret.kind === 'unresolved') return '?'
-    if (node.ret.kind !== 'value') return null
-    const items = node.ret.items
-    const atom = items.length === 1 && items[0]?.id === node.type && items[0].count.eq(1)
-    if (policy === 'auto' && atom) return null
+  function formatYields(items: readonly Yield[]): string {
     return items
       .map((entry) => {
         const label = registry.shortOf(entry.id)
         return entry.count.gt(1) ? `${label}×${fmt(entry.count)}` : label
       })
       .join(' ')
+  }
+
+  /**
+   * `[]` 里的文本：null = 不显示方括号；'?' = 空手检测不通过。
+   * **手持可命中提示（D-34）**：`unresolved` 且手持物能命中时，显示**预测产物**替代 `[?]`
+   * （`isHeldHint` 为真，组件挂 `.is-held-hint` 虚线下划线）——与点击共用 `findRecipe`，
+   * 看到什么就点什么得什么。`held` 由 store 绑定（`heldItem`），本层保持纯函数。
+   */
+  function retOf(node: GameNode, held: string | null = null): string | null {
+    const def = registry.node(node.type)
+    if (!def) return null
+    const policy = def.retDisplay ?? 'auto'
+    if (policy === 'never') return null
+    if (node.ret.kind === 'unresolved') {
+      if (held) {
+        const recipe = findRecipe(registry, node, held)
+        if (recipe) {
+          const text = formatYields(recipe.out.map((o) => ({ id: o.item, count: D(o.count ?? 1) })))
+          if (text) return text
+        }
+      }
+      return '?'
+    }
+    if (node.ret.kind !== 'value') return null
+    const items = node.ret.items
+    const atom = items.length === 1 && items[0]?.id === node.type && items[0].count.eq(1)
+    if (policy === 'auto' && atom) return null
+    return formatYields(items)
+  }
+
+  /** 手持可命中（D-34）：`unresolved` 且手持物能命中（`retOf` 正显示预测产物） */
+  function isHeldHint(node: GameNode, held: string | null = null): boolean {
+    if (!held || node.ret.kind !== 'unresolved') return false
+    return findRecipe(registry, node, held) !== undefined
   }
 
   function chipState(node: GameNode): 'ok' | 'idle' | 'unknown' {
@@ -114,6 +138,7 @@ export function createDisplayHelpers(registry: NodeRegistry) {
   return {
     nameOf,
     retOf,
+    isHeldHint,
     chipState,
     chipKind,
     chipKindOfType,

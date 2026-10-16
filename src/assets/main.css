@@ -334,6 +334,15 @@
 .chip.is-idle .chip-ret {
   color: color-mix(in oklab, var(--hue-warn), #0b0b10 var(--dim));
 }
+/* 手持可命中（D-34）：结构未完成（idle）但手持物可解——预测产物 + 虚线下划线
+   （与悬停下划线同一视觉语言；显示与点击共用 findRecipe，看到即点得到） */
+.chip.is-idle .chip-ret.is-held-hint {
+  color: color-mix(in oklab, var(--hue-ret), #0b0b10 var(--dim));
+  text-decoration: underline dashed;
+  text-decoration-color: var(--hue-ret);
+  text-underline-offset: 3px;
+  opacity: 0.85;
+}
 
 /* ---------- 悬停标记（docs/06 §6.1）：只给被悬停节点的「父节点」加下划线 ---------- */
 .chip.is-hover-parent {

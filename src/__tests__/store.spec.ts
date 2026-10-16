@@ -94,6 +94,22 @@ describe('store 集成：点击求值（产出物品进背包）', () => {
     expect(held(store, 'parts')).toBe(partsBefore + 1)
   })
 
+  it('手持可命中提示（D-34）：手持斧头时森林的 [?] 显示预测产物（虚线提示）', () => {
+    const store = freshStore()
+    const forest = findFirst(store, 'forest')
+    if (!forest) throw new Error('森林缺失')
+    expect(store.retOf(forest)).toBe('?') // 空手：未命中
+    expect(store.isHeldHint(forest)).toBe(false)
+
+    store.itemRowClick('axe') // 选中手持
+    expect(store.retOf(forest)).toBe('木') // 预测产物（short 名）替代 [?]
+    expect(store.isHeldHint(forest)).toBe(true)
+
+    store.itemRowClick('axe') // 放下手持 → 回到 [?]
+    expect(store.retOf(forest)).toBe('?')
+    expect(store.isHeldHint(forest)).toBe(false)
+  })
+
   it('手持 = 选中背包物品：手持斧头点森林 → 木材（隐式实参）', () => {
     const store = freshStore()
     const forest = findFirst(store, 'forest')
