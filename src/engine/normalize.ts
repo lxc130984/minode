@@ -19,16 +19,13 @@ export const RET_UNRESOLVED: RetState = { kind: 'unresolved' }
 export function computeRet(node: GameNode, registry: NodeRegistry): RetState {
   const def = registry.node(node.type)
   if (!def) return RET_NONE
-  const modes = registry.recipeModes(node.type)
-  if (modes.length > 0) {
+  if (registry.recipesFor(node.type).length > 0) {
     if (node.children.some((child) => child.ret.kind !== 'value')) return RET_UNRESOLVED
-    for (const mode of modes) {
-      const recipe = registry.recipeFor(node.type, mode, childrenSignatureKey(node.children, mode))
-      if (recipe) {
-        return {
-          kind: 'value',
-          items: recipe.out.map((out) => ({ id: out.item, count: D(out.count ?? 1) })),
-        }
+    const recipe = registry.recipeFor(node.type, childrenSignatureKey(node.children))
+    if (recipe) {
+      return {
+        kind: 'value',
+        items: recipe.out.map((out) => ({ id: out.item, count: D(out.count ?? 1) })),
       }
     }
     return RET_UNRESOLVED

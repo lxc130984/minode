@@ -9,8 +9,6 @@ import type {
   RecipeDef,
 } from './types'
 
-export type RecipeMode = 'multiset' | 'ordered'
-
 export interface NodeRegistry {
   readonly defs: ContentDefs
   readonly config: EngineConfig
@@ -21,10 +19,8 @@ export interface NodeRegistry {
   /** short ?? name；未注册 → id */
   shortOf(id: string): string
   recipesFor(type: NodeTypeId): readonly RecipeDef[]
-  /** 该类型配方用到的匹配模式（去重，通常只有 1 个；无配方 = 空数组 = 符号） */
-  recipeModes(type: NodeTypeId): readonly RecipeMode[]
-  /** 按「模式 + 签名」O(1) 取配方；无命中返回 undefined */
-  recipeFor(type: NodeTypeId, mode: RecipeMode, key: string): RecipeDef | undefined
+  /** 按签名 O(1) 取配方；无命中返回 undefined */
+  recipeFor(type: NodeTypeId, key: string): RecipeDef | undefined
 }
 
 /** 已知面板 id（`NodeDef.panel` 只认这些）。 */
@@ -104,17 +100,14 @@ export function buildRegistry(defs: ContentDefs): NodeRegistry {
     else recipesByType.set(recipe.at, [recipe])
   }
 
-  // 构建期预编译派发表：模式去重 + `${mode}::${签名}` → 配方
-  const recipeIndex = new Map<NodeTypeId, { modes: RecipeMode[]; byKey: Map<string, RecipeDef> }>()
+  // 构建期预编译派发表：`${签名}` → 配方（归一化与点击求值共用）
+  const recipeIndex = new Map<NodeTypeId, Map<string, RecipeDef>>()
   for (const [type, recipes] of recipesByType) {
-    const modes: RecipeMode[] = []
     const byKey = new Map<string, RecipeDef>()
     for (const recipe of recipes) {
-      const mode = recipe.match ?? 'multiset'
-      if (!modes.includes(mode)) modes.push(mode)
-      byKey.set(`${mode}::${recipeSignatureKey(recipe)}`, recipe)
+      byKey.set(recipeSignatureKey(recipe), recipe)
     }
-    recipeIndex.set(type, { modes, byKey })
+    recipeIndex.set(type, byKey)
   }
 
   return {
@@ -125,7 +118,6 @@ export function buildRegistry(defs: ContentDefs): NodeRegistry {
     labelOf: (id) => (nodeMap.get(id) ?? itemMap.get(id))?.name ?? id,
     shortOf: (id) => (nodeMap.get(id) ?? itemMap.get(id))?.short ?? id,
     recipesFor: (type) => recipesByType.get(type) ?? [],
-    recipeModes: (type) => recipeIndex.get(type)?.modes ?? [],
-    recipeFor: (type, mode, key) => recipeIndex.get(type)?.byKey.get(`${mode}::${key}`),
+    recipeFor: (type, key) => recipeIndex.get(type)?.get(key),
   }
 }

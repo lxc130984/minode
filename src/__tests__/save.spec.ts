@@ -1,15 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test'
 
 import { D } from '@/engine/num'
-import {
-  deserialize,
-  serialize,
-  SAVE_VERSION,
-  type SaveV1,
-  type SaveV2,
-  type SaveV3,
-  type SaveV4,
-} from '@/engine/save'
+import { deserialize, serialize, SAVE_VERSION, type SaveV3, type SaveV4 } from '@/engine/save'
 import { node, TEST_DEFS, testRegistry } from './fixtures'
 
 const registry = testRegistry()
@@ -114,6 +106,11 @@ describe('v3 → v4 迁移（生产线模型，D-26）', () => {
     expect(restored.chestContents[chest.id]?.coal?.toNumber()).toBe(5)
   })
 
+  it('未知版本（v1/v2 时代格式已移除）→ 抛错，由调用方保持现状', () => {
+    const legacy = { v: 2, savedAt: 0, roots: [], nodeBag: [], resources: {}, selected: 0 }
+    expect(() => deserialize(legacy as unknown as SaveV3, registry)).toThrow(/未知存档版本/)
+  })
+
   it('未知内容 id 的堆被安全丢弃', () => {
     const v3: SaveV3 = {
       v: 3,
@@ -124,68 +121,6 @@ describe('v3 → v4 迁移（生产线模型，D-26）', () => {
       selected: 0,
     }
     expect(deserialize(v3, registry).bag).toEqual({})
-  })
-})
-
-describe('v1 / v2 链式迁移', () => {
-  it('v1 槽位 → v2 节点 → v3 堆 → v4 物品背包', () => {
-    const legacy: SaveV1 = {
-      v: 1,
-      savedAt: 9,
-      roots: [],
-      inventory: [
-        { item: 'iron', count: '4' },
-        { item: 'mine', count: '2' },
-      ],
-      hotbar: [{ item: 'iron', count: '3' }],
-      selected: 0,
-    }
-
-    const restored = deserialize(legacy, registry)
-    expect(restored.bag.iron?.toNumber()).toBe(7)
-    expect(restored.bag.ore?.toNumber()).toBe(4) // mine×2 → 成本 2×2
-  })
-
-  it('旧存档里的 buffer / auto 字段被安全忽略', () => {
-    const legacy = {
-      v: 1,
-      savedAt: 0,
-      roots: [
-        {
-          type: 'smelter',
-          collapsed: false,
-          auto: { on: true, acc: 500 },
-          buffer: [['iron', '5']],
-          children: [],
-        },
-      ],
-      inventory: [],
-      hotbar: [],
-      selected: 0,
-    } as unknown as SaveV1
-
-    const restored = deserialize(legacy, registry)
-    expect(restored.roots[0]?.type).toBe('smelter')
-    expect(restored.roots[0]?.children).toHaveLength(0)
-  })
-
-  it('v2 背包节点实例按 type 合并后走同一条迁移链', () => {
-    const v2: SaveV2 = {
-      v: 2,
-      savedAt: 5,
-      roots: [],
-      nodeBag: [
-        { type: 'mine', collapsed: false, children: [] },
-        { type: 'mine', collapsed: false, children: [] },
-        null,
-        { type: 'ore', collapsed: false, children: [] },
-      ],
-      resources: { iron: '2' },
-      selected: 0,
-    }
-    const restored = deserialize(v2, registry)
-    expect(restored.bag.ore?.toNumber()).toBe(4 + 1) // mine×2 的成本 + ore 节点
-    expect(restored.bag.iron?.toNumber()).toBe(2)
   })
 })
 

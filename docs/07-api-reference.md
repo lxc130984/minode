@@ -51,9 +51,9 @@ export function D(value: Num): Decimal // 归一化；全仓唯一 Decimal 创�
 | `Yield`        | `{ id, count }` 产物条目（id = 物品 id；曾用名 `ItemAmount`）                                  |
 | `ItemDef`      | `{ id, name, short?, toolClass?, raw? }`；`raw` = 分解终点                                     |
 | `ItemStore`    | `Record<ItemId, Decimal>`；背包与箱子的形状（容量按总数量计）                                  |
-| `NodeDef`      | `{ id, name, short?, retDisplay?, toolClass?, panel?, cost? }`                                 |
+| `NodeDef`      | `{ id, name, short?, toolClass?, panel?, cost? }`                                              |
 | `CostArg`      | `{ item, count? }` 建造成本条目                                                                |
-| `RecipeDef`    | `{ at, match?('multiset'\|'ordered'), args, out }`；`out` 必须是物品                           |
+| `RecipeDef`    | `{ at, args, out }`；`out` 必须是物品（签名 = 多重集，唯一模式）                               |
 | `EvalOp`       | `{ op: 'gain', id, count }`——唯一效果原语                                                      |
 | `EngineConfig` | `bagCapacity / chestCapacity / recycleRate?`                                                   |
 
@@ -70,10 +70,8 @@ export function subtreeContains(node, id): boolean // 防环校验
 ### 2.4 `engine/match.ts` — 签名与配方检测
 
 ```ts
-export function childrenValues(node): Yield[] // 子 ret 的 value 条目
-export function multisetKey(values) / orderedKey(values) / signatureKey(values, mode)
 export function recipeSignatureKey(recipe): string // 由 args 生成
-export function childrenSignatureKey(children, mode, held?): string
+export function childrenSignatureKey(children, held?): string
 // 直接由子节点构造；held 给定时作为隐式实参排最前（docs/10 §4）
 ```
 
@@ -92,9 +90,8 @@ export interface NodeRegistry {
   defs / config
   item(id) / node(id)
   labelOf(id) / shortOf(id) // 未注册 → id 本身
-  recipesFor(type)
-  recipeModes(type) // 空 = 符号
-  recipeFor(type, mode, key) // '模式::签名' → 配方，O(1)
+  recipesFor(type) // 空 = 符号
+  recipeFor(type, key) // 签名 → 配方，O(1)
 }
 export function buildRegistry(defs): NodeRegistry // 校验不过 → throw
 ```

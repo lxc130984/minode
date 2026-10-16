@@ -9,9 +9,7 @@
     "preview": "vp preview",
     "build-only": "vp build",
     "type-check": "vue-tsc --build",
-    "lint": "run-s \"lint:*\"",
-    "lint:oxlint": "vp lint . --fix",
-    "lint:eslint": "vp lint . --fix",
+    "lint": "vp lint . --fix",
     "format": "vp fmt src/",
     "prepare": "vp config"
   },

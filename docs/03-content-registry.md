@@ -48,10 +48,9 @@ export interface NodeRegistry {
 }
 ```
 
-- **没有配方的类型 = 符号**：`recipeModes` 为空，点击天然无响应（无处理器派发）。
+- **没有配方的类型 = 符号**：`recipesFor` 为空，点击天然无响应。
 - 注册表构建后**只读**；运行时不注册、不卸载。
-- 构建期预编译：签名哈希表（归一化与点击求值共用，不存在第二条检测路径）+
-  单产物反查表（分解用）。
+- 构建期预编译：签名哈希表（归一化与点击求值共用，不存在第二条检测路径）。
 
 ## 3. 数值中心：EngineConfig
 
@@ -79,7 +78,6 @@ export interface NodeDef {
   id: NodeTypeId
   name: string
   short?: string
-  retDisplay?: 'auto' | 'always' | 'never'
   toolClass?: string // 仅 UI 着色
   panel?: string // 点击打开的浮动窗口 id（'storage' = 箱子）
   cost?: readonly CostArg[] // 建造成本（物品列表）；缺省 = 免费

@@ -53,9 +53,8 @@ ret    := 省略 | '[' 值 ']' | '[?]'
 `.is-held-hint`（虚线下划线，与悬停下划线同语言）——`森林[?]` 手持斧头时显示为
 `森林[木]`（虚线），点击必得木材；放下回到 `[?]`。
 
-**原子自返省略规则**（`retDisplay: 'auto'`，默认）：值为单个条目、数量 1、且条目 id
-等于本节点 `type` 时省略方括号——`铁矿石` 比 `铁矿石[铁矿石]` 干净。
-内容作者可用 `retDisplay: 'always' | 'never'` 覆盖。
+**原子自返省略规则**：值为单个条目、数量 1、且条目 id 等于本节点 `type` 时省略方括号
+——`铁矿石` 比 `铁矿石[铁矿石]` 干净。
 
 ### 1.3 状态示例
 
@@ -76,7 +75,7 @@ ret    := 省略 | '[' 值 ']' | '[?]'
 export interface GameNode {
   id: NodeId // 运行时唯一；不入存档（加载时重建）
   type: NodeTypeId // 注册表键
-  children: GameNode[] // 实参列表；顺序 = 显示顺序 = 签名（ordered）顺序
+  children: GameNode[] // 实参列表；顺序 = 显示顺序
   folded: boolean // 折叠（纯视觉，≠ 回收）；存档字段沿用线上名 collapsed
   ret: RetState // 返回值；由归一化重算，任何其他地方不得手改
 }
@@ -109,7 +108,6 @@ export interface NodeDef {
   id: NodeTypeId
   name: string // chip 主文本
   short?: string // `[]` 与提示用的紧凑名；默认 = name
-  retDisplay?: 'auto' | 'always' | 'never' // 默认 auto
   toolClass?: string // 仅 UI 分类着色（k-tool）；不参与求值
   panel?: string // 点击打开的浮动窗口 id（'storage' = 箱子）
   cost?: readonly CostArg[] // 建造成本（物品）；回收时分解返还

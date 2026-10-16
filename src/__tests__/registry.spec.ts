@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test'
 
-import { childrenSignatureKey, childrenValues, multisetKey, orderedKey } from '@/engine/match'
+import { childrenSignatureKey } from '@/engine/match'
 import { normalizeTree } from '@/engine/normalize'
 import { buildRegistry } from '@/engine/registry'
 import { node, TEST_DEFS, testRegistry } from './fixtures'
@@ -110,38 +110,22 @@ describe('物品与标签', () => {
 })
 
 describe('配方派发索引', () => {
-  const registry = testRegistry({
-    ...TEST_DEFS,
-    nodes: [...TEST_DEFS.nodes, { id: 'mixer', name: '混合器' }],
-    recipes: [
-      { at: 'mixer', args: [{ item: 'ore' }, { item: 'coal' }], out: [{ item: 'iron' }] },
-      {
-        at: 'mixer',
-        match: 'ordered',
-        args: [{ item: 'ore' }, { item: 'coal' }],
-        out: [{ item: 'gear' }],
-      },
-    ],
+  it('按签名 O(1) 命中：recipesFor 非空 = 函数；空 = 符号', () => {
+    const registry = testRegistry()
+    expect(registry.recipesFor('smelter').length).toBe(1)
+    expect(registry.recipesFor('ore').length).toBe(0) // 符号：无配方
+
+    const smelter = node('smelter', node('ore'), node('coal'), node('oxygen'))
+    normalizeTree([smelter], registry)
+    const recipe = registry.recipeFor('smelter', childrenSignatureKey(smelter.children))
+    expect(recipe?.out).toEqual([{ item: 'iron' }])
+    // 实参不对 → 落空
+    expect(registry.recipeFor('smelter', 'nonexistent-key')).toBeUndefined()
   })
 
-  it('recipeModes 去重且无配方为空', () => {
-    expect(registry.recipeModes('mixer')).toEqual(['multiset', 'ordered'])
-    expect(registry.recipeModes('ore')).toEqual([])
-  })
-
-  it('同一 (type, key) 下 multiset 与 ordered 各命中自己的配方', () => {
-    const mixer = node('mixer', node('ore'), node('coal'))
-    normalizeTree([mixer], registry)
-    const multiKey = childrenSignatureKey(mixer.children, 'multiset')
-    const orderedSignature = childrenSignatureKey(mixer.children, 'ordered')
-    expect(multiKey).toBe(multisetKey(childrenValues(mixer)))
-    expect(orderedSignature).toBe(orderedKey(childrenValues(mixer)))
-    expect(registry.recipeFor('mixer', 'multiset', multiKey)?.out).toEqual([{ item: 'iron' }])
-    expect(registry.recipeFor('mixer', 'ordered', orderedSignature)?.out).toEqual([
-      { item: 'gear' },
-    ])
-    // 两模式互不串味：拿另一模式的键去查必然落空
-    expect(registry.recipeFor('mixer', 'ordered', multiKey)).toBeUndefined()
-    expect(registry.recipeFor('mixer', 'multiset', orderedSignature)).toBeUndefined()
+  it('同类型同签名重复 → 抛错（签名维度唯一：多重集，D-36）', () => {
+    const recipe = TEST_DEFS.recipes[2]
+    if (!recipe) throw new Error('fixture 配方缺失')
+    expect(() => buildRegistry({ ...TEST_DEFS, recipes: [recipe, recipe] })).toThrow(/签名重复/)
   })
 })

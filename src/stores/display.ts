@@ -32,10 +32,7 @@ export function createDisplayHelpers(registry: NodeRegistry) {
    * 看到什么就点什么得什么。`held` 由 store 绑定（`heldItem`），本层保持纯函数。
    */
   function retOf(node: GameNode, held: string | null = null): string | null {
-    const def = registry.node(node.type)
-    if (!def) return null
-    const policy = def.retDisplay ?? 'auto'
-    if (policy === 'never') return null
+    if (!registry.node(node.type)) return null
     if (node.ret.kind === 'unresolved') {
       if (held) {
         const recipe = findRecipe(registry, node, held)
@@ -49,7 +46,7 @@ export function createDisplayHelpers(registry: NodeRegistry) {
     if (node.ret.kind !== 'value') return null
     const items = node.ret.items
     const atom = items.length === 1 && items[0]?.id === node.type && items[0].count.eq(1)
-    if (policy === 'auto' && atom) return null
+    if (atom) return null // 原子自返省略方括号
     return formatYields(items)
   }
 

@@ -24,26 +24,18 @@ export interface EvalOutcome {
 }
 
 /**
- * 静态配方检测（含手持回落，docs/10 §4）：对每种模式先试「手持 + 子实参」签名，
- * 再试空手签名。手持永远不会打断已有配方——只增加命中可能。
+ * 静态配方检测（含手持回落，docs/10 §4）：先试「手持 + 子实参」签名，再试空手签名。
+ * 手持永远不会打断已有配方——只增加命中可能。
  */
 export function findRecipe(
   registry: NodeRegistry,
   node: GameNode,
   held: string | null = null,
 ): RecipeDef | undefined {
-  for (const mode of registry.recipeModes(node.type)) {
-    const hit = registry.recipeFor(node.type, mode, childrenSignatureKey(node.children, mode, held))
-    if (hit) return hit
-    if (held) {
-      const fallback = registry.recipeFor(
-        node.type,
-        mode,
-        childrenSignatureKey(node.children, mode),
-      )
-      if (fallback) return fallback
-    }
-  }
+  const type = node.type
+  const hit = registry.recipeFor(type, childrenSignatureKey(node.children, held))
+  if (hit) return hit
+  if (held) return registry.recipeFor(type, childrenSignatureKey(node.children)) ?? undefined
   return undefined
 }
 
@@ -56,8 +48,8 @@ export function findRecipe(
  * - 不 eval 子节点——子节点只提供静态返回值供签名检测。
  */
 export function evalNode(node: GameNode, world: EvalWorld, options: EvalOptions = {}): EvalOutcome {
-  if (world.registry.recipeModes(node.type).length === 0) {
-    return { node: node.id, recipe: undefined, effective: false }
+  if (world.registry.recipesFor(node.type).length === 0) {
+    return { node: node.id, recipe: undefined, effective: false } // 符号：无响应
   }
   const recipe = findRecipe(world.registry, node, options.held ?? null)
   if (!recipe) return { node: node.id, recipe: undefined, effective: false }

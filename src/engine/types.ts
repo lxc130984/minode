@@ -45,7 +45,7 @@ export type RetState =
 export interface GameNode {
   id: NodeId
   type: NodeTypeId
-  /** 实参列表；顺序 = 显示顺序 = 签名（ordered 模式）顺序 */
+  /** 实参列表；顺序 = 显示顺序 */
   children: GameNode[]
   /** 折叠（纯视觉收合，≠ 回收）；存档字段沿用线上名 `collapsed`（docs/10 §5） */
   folded: boolean
@@ -70,8 +70,6 @@ export interface NodeDef {
   name: string
   /** 紧凑名（`[]` 用）；缺省 = name */
   short?: string
-  /** 返回值显示策略；缺省 'auto'（符号自返省略方括号） */
-  retDisplay?: 'auto' | 'always' | 'never'
   /** 工具类别：仅用于 UI 分类着色（k-tool）；不参与求值（手持 = 隐式实参，docs/10 §4） */
   toolClass?: string
   /** 点击该节点打开的浮动窗口 id（`'storage'` = 箱子）；有 panel 的节点通常没有配方 */
@@ -92,8 +90,7 @@ export interface RecipeArg {
 export interface RecipeDef {
   /** 函数类型（NodeTypeId） */
   at: NodeTypeId
-  /** 签名模式；缺省 multiset（顺序无关、数量有关） */
-  match?: 'multiset' | 'ordered'
+  /** 实参签名：多重集（顺序无关、数量有关）——唯一匹配模式（D-36） */
   args: readonly RecipeArg[]
   /** 产物全部是物品（进背包） */
   out: readonly RecipeArg[]

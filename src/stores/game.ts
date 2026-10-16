@@ -9,15 +9,7 @@ import { bagAdd, bagTake, canAfford, costGap, payCost } from '@/engine/bag'
 import { createNode, subtreeContains } from '@/engine/node'
 import { normalizeTree, computeRet } from '@/engine/normalize'
 import { D, Decimal } from '@/engine/num'
-import {
-  deserialize,
-  SAVE_KEY,
-  serialize,
-  type SaveV1,
-  type SaveV2,
-  type SaveV3,
-  type SaveV4,
-} from '@/engine/save'
+import { deserialize, SAVE_KEY, serialize, type SaveV3, type SaveV4 } from '@/engine/save'
 import type { GameNode, ItemId, ItemStore, NodeId, NodeTypeId } from '@/engine/types'
 import { createFeedback } from '@/stores/feedback'
 import { createDisplayHelpers } from '@/stores/display'
@@ -316,7 +308,7 @@ export const useGameStore = defineStore('game', () => {
   /** 应用一份快照（撤销 / 重做 / 穿梭 / 读档共用） */
   function applySnapshot(raw: string): boolean {
     try {
-      const save = JSON.parse(raw) as SaveV1 | SaveV2 | SaveV3 | SaveV4
+      const save = JSON.parse(raw) as SaveV3 | SaveV4
       const snapshot = deserialize(save, registry)
       roots.value = snapshot.roots
       bag.value = snapshot.bag

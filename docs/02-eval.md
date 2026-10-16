@@ -19,7 +19,7 @@
 
 ```ts
 export function evalNode(node, world, options?): EvalOutcome {
-  if (world.registry.recipeModes(node.type).length === 0)
+  if (world.registry.recipesFor(node.type).length === 0)
     return { node: node.id, recipe: undefined, effective: false } // 符号：无响应
   const recipe = findRecipe(world.registry, node, options.held ?? null)
   if (!recipe) return { node: node.id, recipe: undefined, effective: false } // [?]：检测不通过
@@ -75,7 +75,6 @@ export function findRecipe(registry, node, held = null): RecipeDef | undefined {
   （补实参、开新配方），不会让原本能点的点不动；
 - **内层求值永远是经典 eval**：手持只作用于被点击的那一层；静态返回值（`[]` 显示与
   父级签名）一律按空手计算；
-- 手持对 ordered 配方同样排最前（可补首位实参）；
 - 内容侧零代码：「手持斧头点森林得木材」就是一条配方数据
   `{ at: 'forest', args: [{ item: 'axe' }], out: [{ item: 'wood' }] }`；
 - **手持可命中提示（D-34）**：静态显示按空手语义，但当手持物能命中时，`retOf` 以
@@ -87,17 +86,15 @@ export function findRecipe(registry, node, held = null): RecipeDef | undefined {
 ### 4.1 签名 = 实参返回值的键
 
 - 每个子节点把自己 `ret` 的 value 条目（含 count）并入签名；
-- 默认 `multiset` 模式：顺序无关、数量有关——`{铁矿石, 煤炭, 氧气}` 任意顺序都命中，
+- 多重集语义（唯一模式，D-36）：顺序无关、数量有关——`{铁矿石, 煤炭, 氧气}` 任意顺序都命中，
   两个铁矿石 ≠ 一个铁矿石；
-- `ordered` 模式（内容可选）：按子节点顺序比较序列；
 - **不多不少**：多挂一个实参会失配 → `[?]`；
 - **不 eval 子节点**：检测只读它们已算好的返回值。
 
 ```ts
 export interface RecipeDef {
   at: NodeTypeId // 函数类型
-  match?: 'multiset' | 'ordered' // 默认 multiset
-  args: readonly RecipeArg[] // 匹配实参签名（物品 id 或节点类型 id）
+  args: readonly RecipeArg[] // 实参签名（物品 id 或节点类型 id）
   out: readonly RecipeArg[] // 产物（必须是物品 id，校验强制）
 }
 ```
@@ -150,6 +147,6 @@ export interface EvalOp {
 - [ ] 表达式点击：检测命中 → 产出进背包；实参不符 → `[?]` 且无产出，有单测
 - [ ] 点击不 eval 子节点：只有被点表达式产出，有单测
 - [ ] `[?]` 传染（任一子未识别 → 父未识别），有单测
-- [ ] 手持隐式实参：含手持命中 / 回落空手命中 / 补首位（ordered），有单测
+- [ ] 手持隐式实参：含手持命中 / 回落空手命中，有单测
 - [ ] 内层求值不受手持影响（静态值一律空手语义）
-- [ ] multiset/ordered 签名、实参「不多不少」有单测
+- [ ] 多重集签名（顺序无关/数量有关）、实参「不多不少」有单测

@@ -525,3 +525,23 @@ scrollSpeed`；放置模式由视觉层 rAF 循环驱动（指针停在树区边
 - **代价**：返还物品可能出现小数（背包本就 Decimal 原生）；`fmt` 展示为 `0.9` 这类。
 - **教训**：为「返还什么」引入一套配方逆推 = 把配方的单射假设塞进数据模型；
   需求是「打折退回」，一条乘法就够了。
+
+### D-36 僵尸代码清扫：v1/v2 迁移链、ordered 模式、retDisplay、重复 lint 脚本
+
+- **决策**（2026-10-15，纯删除，行为零变化，89 测试全绿）：
+  1. **删 v1/v2 存档迁移**：`SaveV1/SaveV2/StackSave/LegacySaveNode/migrateV1/migrateV2`
+     （~100 行）——那是节点背包时代的格式，早已没有真实存量；保留 v3→v4（上一个格式）；
+     未知版本抛错（读档失败 → 保持现状，applySnapshot 已有兜底）。
+  2. **删 `ordered` 匹配模式**：`RecipeDef.match` 字段、`RecipeMode`、`recipeModes()`、
+     双模式索引、`orderedKeyOf`、全链路 mode 参数——内容包从未用过一条 ordered 配方，
+     属投机泛化（D-25 教训：第二个用户出现之前不做抽象）。签名 = 多重集，唯一模式。
+  3. **删 `retDisplay` 枚举**：三个值内容包一个没设过；`auto`（原子自返省略方括号）
+     是唯一行为，直接内联。
+  4. **删 match.ts 测试专用导出**：`childrenValues/multisetKey/orderedKey/signatureKey`
+     生产零引用；测试改走生产函数（`childrenSignatureKey/recipeSignatureKey`），
+     公共 API 面不再为测试服务。
+  5. **合并重复 lint 脚本**：`lint:oxlint` 与 `lint:eslint` 是同一条命令跑两遍，
+     合并为 `lint: vp lint . --fix`。
+- **背景**：用户审读代码提出的五处冗余，逐一核实全部属实。
+- **教训**：迁移链按「上一格式」保留即可，历史格式在格式革命（D-26）时随旧模型一起退场；
+  内容能力（ordered/retDisplay）没有内容使用就是死重。

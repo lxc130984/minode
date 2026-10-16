@@ -53,12 +53,7 @@ export const TEST_DEFS: ContentDefs = {
       args: [{ item: 'ore' }, { item: 'coal' }, { item: 'oxygen' }],
       out: [{ item: 'iron' }],
     },
-    {
-      at: 'assembler',
-      match: 'ordered',
-      args: [{ item: 'ore' }, { item: 'coal' }],
-      out: [{ item: 'gear' }],
-    },
+    { at: 'assembler', args: [{ item: 'ore' }, { item: 'coal' }], out: [{ item: 'gear' }] },
     // 手持斧头点击森林 → 木材（斧头 = 隐式实参）
     { at: 'forest', args: [{ item: 'axe' }], out: [{ item: 'wood' }] },
   ],

@@ -1,106 +1,67 @@
 import { describe, expect, it } from 'vite-plus/test'
 
-import {
-  childrenSignatureKey,
-  childrenValues,
-  multisetKey,
-  orderedKey,
-  recipeSignatureKey,
-  signatureKey,
-} from '@/engine/match'
+import { childrenSignatureKey, recipeSignatureKey } from '@/engine/match'
 import { normalizeTree } from '@/engine/normalize'
-import { D } from '@/engine/num'
 import { node, testRegistry } from './fixtures'
-import type { GameNode } from '@/engine/types'
 
 const registry = testRegistry()
 
-/** 遍历一棵树，对每个节点断言两条签名路径一致。 */
-function assertKeysAgree(root: GameNode): void {
-  const check = (current: GameNode): void => {
-    for (const mode of ['multiset', 'ordered'] as const) {
-      expect(childrenSignatureKey(current.children, mode)).toBe(
-        signatureKey(childrenValues(current), mode),
-      )
-    }
-    for (const child of current.children) check(child)
-  }
-  check(root)
-}
-
-describe('签名键', () => {
-  it('multiset 顺序无关、数量有关', () => {
-    const ab = multisetKey([
-      { id: 'ore', count: D(1) },
-      { id: 'coal', count: D(1) },
-    ])
-    const ba = multisetKey([
-      { id: 'coal', count: D(1) },
-      { id: 'ore', count: D(1) },
-    ])
-    const aab = multisetKey([
-      { id: 'ore', count: D(2) },
-      { id: 'coal', count: D(1) },
-    ])
-    expect(ab).toBe(ba)
-    expect(ab).not.toBe(aab)
+describe('签名键（多重集：顺序无关、数量有关，D-36 唯一模式）', () => {
+  it('顺序无关：实参换序签名不变', () => {
+    const a = node('smelter', node('ore'), node('coal'), node('oxygen'))
+    const b = node('smelter', node('oxygen'), node('ore'), node('coal'))
+    normalizeTree([a, b], registry)
+    expect(childrenSignatureKey(a.children)).toBe(childrenSignatureKey(b.children))
   })
 
-  it('ordered 顺序敏感', () => {
-    const forward = orderedKey([
-      { id: 'ore', count: D(1) },
-      { id: 'coal', count: D(1) },
-    ])
-    const reversed = orderedKey([
-      { id: 'coal', count: D(1) },
-      { id: 'ore', count: D(1) },
-    ])
-    expect(forward).not.toBe(reversed)
+  it('数量有关：多一个实参签名不同', () => {
+    const a = node('smelter', node('ore'), node('coal'), node('oxygen'))
+    const b = node('smelter', node('ore'), node('ore'), node('coal'), node('oxygen'))
+    normalizeTree([a, b], registry)
+    expect(childrenSignatureKey(a.children)).not.toBe(childrenSignatureKey(b.children))
   })
 
-  it('childrenSignatureKey 与 signatureKey(childrenValues) 逐节点一致', () => {
-    const tree = node(
-      'smelter',
-      node('mine', node('ore'), node('ore')),
-      node('coal'),
-      node('assembler', node('ore'), node('coal')),
+  it('未识别子节点不参与签名（ret 非 value 剔除）', () => {
+    const a = node('smelter', node('ore'), node('coal'), node('oxygen'))
+    normalizeTree([a], registry)
+    const broken = node('smelter', node('ore'), node('coal'), node('smelter')) // 缺氧气、多一台空炉
+    normalizeTree([broken], registry)
+    // 空冶炼炉 unresolved → 不入签名：签名 = {ore, coal} ≠ {ore, coal, oxygen}
+    expect(childrenSignatureKey(broken.children)).not.toBe(childrenSignatureKey(a.children))
+  })
+
+  it('手持隐式实参：排在实参最前（参与多重集）', () => {
+    const partial = node('smelter', node('ore'), node('coal')) // 缺氧气
+    normalizeTree([partial], registry)
+    const full = node('smelter', node('ore'), node('coal'), node('oxygen'))
+    normalizeTree([full], registry)
+    // 手持氧气补位 → 与完整实参同签名
+    expect(childrenSignatureKey(partial.children, 'oxygen')).toBe(
+      childrenSignatureKey(full.children),
     )
-    // 含非 value 子节点的分支也要覆盖
-    const unresolved = node('smelter', node('smelter', node('iron')))
-    normalizeTree([tree, unresolved], registry)
-    assertKeysAgree(tree)
-    assertKeysAgree(unresolved)
+    // 不相关的手持物 → 签名不同
+    expect(childrenSignatureKey(partial.children, 'axe')).not.toBe(
+      childrenSignatureKey(full.children),
+    )
   })
 })
 
-describe('配方键一致性', () => {
+describe('配方键一致性（子节点路径 ↔ 配方 args 路径）', () => {
   it('精确匹配：实参不多不少', () => {
     const smelter = node('smelter', node('ore'), node('coal'), node('oxygen'))
     normalizeTree([smelter], registry)
-    const recipe = registry.recipeFor(
-      'smelter',
-      'multiset',
-      childrenSignatureKey(smelter.children, 'multiset'),
-    )
+    const recipe = registry.recipeFor('smelter', childrenSignatureKey(smelter.children))
     expect(recipe).toBeDefined()
-    expect(childrenSignatureKey(smelter.children, 'multiset')).toBe(recipeSignatureKey(recipe!))
+    expect(childrenSignatureKey(smelter.children)).toBe(recipeSignatureKey(recipe!))
 
     smelter.children.push(node('coal'))
     normalizeTree([smelter], registry)
-    expect(
-      registry.recipeFor('smelter', 'multiset', childrenSignatureKey(smelter.children, 'multiset')),
-    ).toBeUndefined()
+    expect(registry.recipeFor('smelter', childrenSignatureKey(smelter.children))).toBeUndefined()
   })
 
-  it('ordered 配方只按位置命中', () => {
-    const right = node('assembler', node('ore'), node('coal'))
-    const wrong = node('assembler', node('coal'), node('ore'))
-    normalizeTree([right, wrong], registry)
-    expect(
-      registry.recipeFor('assembler', 'ordered', childrenSignatureKey(right.children, 'ordered')),
-    ).toBeDefined()
-    expect(
-      registry.recipeFor('assembler', 'ordered', childrenSignatureKey(wrong.children, 'ordered')),
-    ).toBeUndefined()
+  it('同类型多条不同签名的配方共存（签名维度唯一：多重集，D-36）', () => {
+    const r = testRegistry()
+    expect(r.recipesFor('mine').length).toBe(2) // ore / coal 两条矿井配方
+    // 重复签名的构建期拒绝在 registry.spec 有专门用例
   })
 })
