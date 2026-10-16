@@ -25,8 +25,6 @@ export interface NodeRegistry {
   recipeModes(type: NodeTypeId): readonly RecipeMode[]
   /** 按「模式 + 签名」O(1) 取配方；无命中返回 undefined */
   recipeFor(type: NodeTypeId, mode: RecipeMode, key: string): RecipeDef | undefined
-  /** 「唯一产物是该物品」的配方（分解/回收下钻用，docs/04 §3）；没有 → undefined */
-  decomposeRecipeOf(item: ItemId): RecipeDef | undefined
 }
 
 /** 已知面板 id（`NodeDef.panel` 只认这些）。 */
@@ -106,14 +104,6 @@ export function buildRegistry(defs: ContentDefs): NodeRegistry {
     else recipesByType.set(recipe.at, [recipe])
   }
 
-  // 构建期预编译：单产物反查表（分解/回收下钻用）
-  const singleOutput = new Map<ItemId, RecipeDef>()
-  for (const recipe of defs.recipes) {
-    if (recipe.out.length !== 1) continue
-    const item = recipe.out[0]?.item as ItemId
-    if (item !== undefined && !singleOutput.has(item)) singleOutput.set(item, recipe)
-  }
-
   // 构建期预编译派发表：模式去重 + `${mode}::${签名}` → 配方
   const recipeIndex = new Map<NodeTypeId, { modes: RecipeMode[]; byKey: Map<string, RecipeDef> }>()
   for (const [type, recipes] of recipesByType) {
@@ -137,6 +127,5 @@ export function buildRegistry(defs: ContentDefs): NodeRegistry {
     recipesFor: (type) => recipesByType.get(type) ?? [],
     recipeModes: (type) => recipeIndex.get(type)?.modes ?? [],
     recipeFor: (type, mode, key) => recipeIndex.get(type)?.byKey.get(`${mode}::${key}`),
-    decomposeRecipeOf: (item) => singleOutput.get(item),
   }
 }

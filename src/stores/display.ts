@@ -1,6 +1,6 @@
 import { subtreeSize } from '@/engine/node'
 import { fmt } from '@/utils/format'
-import { costEntries, recycleRefund, type DecomposeCtx } from '@/engine/bag'
+import { costEntries, recycleRefund } from '@/engine/bag'
 import { D, type Decimal } from '@/engine/num'
 import type { NodeRegistry } from '@/engine/registry'
 import type { ChipKind } from '@/stores/game'
@@ -12,17 +12,6 @@ import type { GameNode, ItemId, NodeTypeId, Yield } from '@/engine/types'
  * store 拿到这组绑定后的函数直接对外暴露，组件用法不变。
  */
 export function createDisplayHelpers(registry: NodeRegistry) {
-  /** 分解查询（engine/bag 的 DecomposeCtx）：原材料标记 + 单产物配方反查 */
-  const decomposeCtx: DecomposeCtx = {
-    isRaw: (id) => registry.item(id)?.raw === true,
-    recipeOf: (id) => {
-      const recipe = registry.decomposeRecipeOf(id)
-      const out = recipe?.out[0]
-      if (!recipe || !out) return undefined
-      return { args: recipe.args, outCount: D(out.count ?? 1) }
-    },
-  }
-
   function nameOf(node: GameNode): string {
     return registry.node(node.type)?.name ?? '?'
   }
@@ -116,7 +105,7 @@ export function createDisplayHelpers(registry: NodeRegistry) {
 
   /** 某类型回收后能拿回的原材料清单（提示用；折算在 recycle 内做，这里只读） */
   function recyclePreview(type: NodeTypeId): [ItemId, Decimal][] {
-    return recycleRefund(registry.node(type)?.cost, decomposeCtx, registry.config.recycleRate)
+    return recycleRefund(registry.node(type)?.cost, registry.config.recycleRate)
   }
 
   /** eval 结果的调试描述（调试面板「最近点击」） */

@@ -33,7 +33,7 @@ src/
 │   ├── registry.ts    # buildRegistry：校验 + 预编译签名哈希表 + 单产物反查表
 │   ├── match.ts       # 签名键构造（childrenSignatureKey / recipeSignatureKey）
 │   ├── eval.ts        # evalNode / findRecipe（手持回落）/ applyOps
-│   ├── bag.ts         # 物品库存纯函数 + 成本（canAfford/payCost）+ 分解（decomposeCost）
+│   ├── bag.ts         # 物品库存纯函数 + 成本（canAfford/payCost）+ 回收折算（recycleRefund）
 │   ├── dnd.ts         # guardCycle（duck-typing，可单测）
 │   ├── history.ts     # UndoTree（撤销树，纯逻辑）
 │   └── save.ts        # serialize / deserialize / v1→v2→v3→v4 链式迁移

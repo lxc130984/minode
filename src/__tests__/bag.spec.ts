@@ -7,7 +7,6 @@ import {
   canAfford,
   costEntries,
   costGap,
-  decomposeCost,
   payCost,
   recycleRefund,
 } from '@/engine/bag'
@@ -94,59 +93,27 @@ describe('成本（costEntries / canAfford / costGap / payCost）', () => {
   })
 })
 
-describe('分解（回收 → 原材料，docs/04 §3）', () => {
-  // 铁炉(矿+煤+氧) → 铁；锻造(铁+煤) → 钢（fixtures 的注册表语义）
-  const ctx = {
-    isRaw: (id: string) => ['ore', 'coal', 'oxygen'].includes(id),
-    recipeOf: (id: string) => {
-      if (id === 'iron')
-        return { args: [{ item: 'ore' }, { item: 'coal' }, { item: 'oxygen' }], outCount: D(1) }
-      if (id === 'steel') return { args: [{ item: 'iron' }, { item: 'coal' }], outCount: D(1) }
-      return undefined
-    },
-  }
-
-  it('原材料原样保留；非原材料沿单产物配方的实参递归下钻', () => {
-    expect(decomposeCost([{ item: 'ore', count: 2 }], ctx)).toEqual({ ore: D(2) })
-    // iron×1 → 矿1 煤1 氧1
-    expect(decomposeCost([{ item: 'iron' }], ctx)).toEqual({ ore: D(1), coal: D(1), oxygen: D(1) })
-    // steel×2 → (铁1 煤1)×2 → 矿2 煤2 氧2 + 煤2 = 矿2 煤4 氧2
-    const steel = decomposeCost([{ item: 'steel', count: 2 }], ctx)
-    expect(steel.ore?.toNumber()).toBe(2)
-    expect(steel.coal?.toNumber()).toBe(4)
-    expect(steel.oxygen?.toNumber()).toBe(2)
+describe('回收折算（cost × 返还率，D-35）', () => {
+  it('逐项精确折算（Decimal，允许小数），0 剔除', () => {
+    // 装配台：钢板×3 + 铁×2 × 30% → 钢板×0.9 + 铁×0.6（浮点折算用 toNumber 断言）
+    const refund = recycleRefund(
+      [
+        { item: 'plate', count: 3 },
+        { item: 'iron', count: 2 },
+      ],
+      0.3,
+    )
+    const asMap = Object.fromEntries(refund.map(([id, n]) => [id, n.toNumber()]))
+    expect(asMap.plate).toBeCloseTo(0.9)
+    expect(asMap.iron).toBeCloseTo(0.6)
   })
 
-  it('无配方的物品原样保留（工具/孤品）；环安全', () => {
-    expect(decomposeCost([{ item: 'axe' }], ctx)).toEqual({ axe: D(1) })
-    const loop = {
-      isRaw: () => false,
-      recipeOf: (id: string) =>
-        id === 'a'
-          ? { args: [{ item: 'b' }], outCount: D(1) }
-          : { args: [{ item: 'a' }], outCount: D(1) },
-    }
-    // a↔b 互相引用：不无限递归，回环处（第二个 a）按「原样保留」落袋
-    expect(decomposeCost([{ item: 'a' }], loop)).toEqual({ a: D(1) })
+  it('免费（无 cost）→ 空清单；count 缺省按 1', () => {
+    expect(recycleRefund(undefined, 0.3)).toEqual([])
+    expect(recycleRefund([{ item: 'ore' }], 0.5)).toEqual([['ore', D(0.5)]])
   })
 
-  it('recycleRefund：全量分解 × 返还率向下取整（0 剔除）', () => {
-    // 冶炼炉成本 矿4 煤2 → ×0.3 → 矿×1、煤×0
-    expect(
-      recycleRefund(
-        [
-          { item: 'ore', count: 4 },
-          { item: 'coal', count: 2 },
-        ],
-        ctx,
-        0.3,
-      ),
-    ).toEqual([['ore', D(1)]])
-    // iron×4 → 矿4 煤4 氧4 → ×0.3 → 各×1
-    expect(recycleRefund([{ item: 'iron', count: 4 }], ctx, 0.3)).toEqual([
-      ['ore', D(1)],
-      ['coal', D(1)],
-      ['oxygen', D(1)],
-    ])
+  it('rate = 0 → 空清单', () => {
+    expect(recycleRefund([{ item: 'ore', count: 10 }], 0)).toEqual([])
   })
 })

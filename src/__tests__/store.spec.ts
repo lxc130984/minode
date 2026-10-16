@@ -183,7 +183,7 @@ describe('store 集成：建造（放置模式，消耗物品）', () => {
     expect(held(store, 'oxygen')).toBe(0)
   })
 
-  it('回收：分解成原材料按 30% 返还，子节点上移', () => {
+  it('回收：返还 cost × 30%（Decimal 精确），子节点上移', () => {
     const store = freshStore()
     // 4 矿 + 2 煤建炉，再 1 矿 + 1 煤 + 1 氧放三个实参
     store.bag = { ...store.bag, iron_ore: D(5), coal: D(3), oxygen: D(1) }
@@ -198,10 +198,10 @@ describe('store 集成：建造（放置模式，消耗物品）', () => {
 
     expect(store.recycle(smelter.id)).toBe(true)
     expect(store.roots.some((root) => root.id === smelter.id)).toBe(false)
-    // 成本（铁矿×4 煤×2，都是原材料）× 30% 向下取整：铁矿×1、煤×0；实参节点上移留在树上
-    expect(held(store, 'iron_ore')).toBe(1)
-    expect(held(store, 'coal')).toBe(0)
-    expect(held(store, 'oxygen')).toBe(0)
+    // 成本（铁矿×4 煤×2）× 30% → 铁矿×1.2 + 煤×0.6（精确折算，不再递归分解）
+    expect(store.bag.iron_ore?.toNumber()).toBeCloseTo(1.2)
+    expect(store.bag.coal?.toNumber()).toBeCloseTo(0.6)
+    expect(store.bag.oxygen?.toNumber() ?? 0).toBe(0)
     // 子节点（实参）上移到根层
     const kidTypes = store.roots.map((root) => root.type)
     expect(kidTypes).toContain('iron_ore')
@@ -211,7 +211,7 @@ describe('store 集成：建造（放置模式，消耗物品）', () => {
     expect(store.hint).toContain('30%')
   })
 
-  it('回收箱子：成本沿配方分解成原材料（30%），内容原样返还', () => {
+  it('回收箱子：返还 cost × 30%（不递归分解），内容原样返还', () => {
     const store = freshStore()
     store.bag = { ...store.bag, iron: D(4), coal: D(1) }
     store.place('chest', null, store.roots.length)
@@ -224,12 +224,12 @@ describe('store 集成：建造（放置模式，消耗物品）', () => {
     store.closePanel()
     store.bag = { ...store.bag, iron: D(0) }
     expect(store.recycle(chest.id)).toBe(true)
-    // 成本 iron×4 → 分解：iron ← 冶炼炉(铁矿+煤+氧)×4 = 铁矿4 煤4 氧4 → ×30% → 各×1；
+    // 成本 iron×4 × 30% → iron×1.2（直接返还成本物品，不再反查配方拆成矿/煤/氧）；
     // 箱子内容（煤×1）是玩家存货，原样返还
-    expect(held(store, 'iron')).toBe(0)
-    expect(held(store, 'iron_ore')).toBe(12 + 1)
-    expect(held(store, 'coal')).toBe(1 + 1)
-    expect(held(store, 'oxygen')).toBe(6 + 1)
+    expect(store.bag.iron?.toNumber()).toBeCloseTo(1.2)
+    expect(held(store, 'coal')).toBe(1)
+    expect(held(store, 'iron_ore')).toBe(12)
+    expect(held(store, 'oxygen')).toBe(6)
     expect(store.chestContents[chest.id]).toBeUndefined()
   })
 })

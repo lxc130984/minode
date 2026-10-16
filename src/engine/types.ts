@@ -17,8 +17,6 @@ export interface ItemDef {
   short?: string
   /** 工具类别：仅用于 UI 分类着色（k-tool）；不参与求值 */
   toolClass?: string
-  /** 原材料（基础层）：分解（回收）到此为止，不再沿配方下钻 */
-  raw?: boolean
 }
 
 /** 物品库存（背包 / 箱子同款形状）：id → 数量。无槽位，容量按总数量计。 */

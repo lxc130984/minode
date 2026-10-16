@@ -86,61 +86,23 @@ export function payCost(store: ItemStore, cost: readonly CostArg[] | undefined):
   return next
 }
 
-// ---------- 分解（回收 → 原材料，docs/04 §3） ----------
+// ---------- 回收折算（docs/04 §3，D-35） ----------
 
-/** 回收返还率缺省值（分解成原材料后按此比例向下取整）。 */
+/** 回收返还率缺省值。 */
 export const DEFAULT_RECYCLE_RATE = 0.3
 
-/** 分解所需的查询接口（由注册表提供，保持纯函数可测）。 */
-export interface DecomposeCtx {
-  /** 是否原材料（分解到此为止） */
-  isRaw(id: ItemId): boolean
-  /** 「唯一产物是该物品」的配方（沿它的实参继续下钻）；没有 → undefined */
-  recipeOf(id: ItemId): { args: readonly CostArg[]; outCount: Decimal } | undefined
-}
-
 /**
- * 把成本**全量分解成原材料**：非原材料沿其唯一产出的配方实参递归下钻
- * （数量按产出份数缩放），原材料与无配方的物品原样保留。带环/多路径保护（visited）。
- * 返回各原材料的全量数量（Decimal，允许分数）；返还率由调用方另行施加。
+ * 回收返还清单：**建造成本 × 返还率**，逐项精确折算（Decimal，允许小数——
+ * 装配台 钢板×3+铁×2 × 30% → 钢板×0.9 + 铁×0.6）。不做递归分解、不取整；
+ * 0 剔除。
  */
-export function decomposeCost(
-  cost: readonly CostArg[] | undefined,
-  ctx: DecomposeCtx,
-): Record<ItemId, Decimal> {
-  const out: Record<ItemId, Decimal> = {}
-
-  const walk = (item: ItemId, count: Decimal, visited: Set<ItemId>): void => {
-    if (ctx.isRaw(item)) {
-      out[item] = (out[item] ?? D(0)).add(count)
-      return
-    }
-    const recipe = ctx.recipeOf(item)
-    // 无配方（工具/孤品）或已经走过的路径（防环）→ 原样保留
-    if (!recipe || visited.has(item)) {
-      out[item] = (out[item] ?? D(0)).add(count)
-      return
-    }
-    const next = new Set(visited)
-    next.add(item)
-    for (const arg of recipe.args) {
-      walk(arg.item, count.mul(D(arg.count ?? 1)).div(recipe.outCount), next)
-    }
-  }
-
-  for (const [item, count] of costEntries(cost)) walk(item, count, new Set())
-  return out
-}
-
-/** 分解结果按返还率取整成可入账的清单：`[[原材料, 数量]]`（0 剔除）。 */
 export function recycleRefund(
   cost: readonly CostArg[] | undefined,
-  ctx: DecomposeCtx,
   rate = DEFAULT_RECYCLE_RATE,
 ): [ItemId, Decimal][] {
   const refund: [ItemId, Decimal][] = []
-  for (const [item, count] of Object.entries(decomposeCost(cost, ctx))) {
-    const back = count.mul(D(rate)).floor()
+  for (const [item, count] of costEntries(cost)) {
+    const back = count.mul(D(rate))
     if (back.gt(0)) refund.push([item, back])
   }
   return refund

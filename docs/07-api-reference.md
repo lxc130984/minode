@@ -95,7 +95,6 @@ export interface NodeRegistry {
   recipesFor(type)
   recipeModes(type) // 空 = 符号
   recipeFor(type, mode, key) // '模式::签名' → 配方，O(1)
-  decomposeRecipeOf(item) // 唯一产物配方（分解下钻用）
 }
 export function buildRegistry(defs): NodeRegistry // 校验不过 → throw
 ```

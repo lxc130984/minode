@@ -21,6 +21,7 @@ import {
 import type { GameNode, ItemId, ItemStore, NodeId, NodeTypeId } from '@/engine/types'
 import { createFeedback } from '@/stores/feedback'
 import { createDisplayHelpers } from '@/stores/display'
+import { fmt } from '@/utils/format'
 import { pointerOverSidebar, readDrop, treeZoneAt, type DragEndLike } from '@/utils/tree-drop'
 
 export type ChipState = 'ok' | 'idle' | 'unknown'
@@ -436,10 +437,10 @@ export const useGameStore = defineStore('game', () => {
     return canAfford(bag.value, registry.node(type)?.cost)
   }
 
-  // ---------- 回收（× / 拖到侧栏）：分解成原材料，按返还率折算 ----------
+  // ---------- 回收（× / 拖到侧栏）：返还 cost × 返还率（D-35） ----------
   /**
-   * 回收：节点从树上移除（子节点上移）；建造成本**分解成原材料**并按
-   * `config.recycleRate`（默认 30%）向下取整返还；箱子内容是玩家的存货，原样返还。
+   * 回收：节点从树上移除（子节点上移）；**建造成本 × `config.recycleRate`**
+   * （默认 30%，Decimal 精确折算，允许小数）逐项返还；箱子内容原样返还。
    */
   function recycle(id: NodeId): boolean {
     if (!parentOf.has(id)) return false
@@ -460,7 +461,7 @@ export const useGameStore = defineStore('game', () => {
     }
     for (const [item, count] of display.recyclePreview(node.type)) {
       give(item, count)
-      refundText.push(`${registry.shortOf(item)}×${count.floor().toString()}`)
+      refundText.push(`${registry.shortOf(item)}×${fmt(count)}`)
     }
     const contents = chestContents.value[id]
     if (contents) {
@@ -484,7 +485,7 @@ export const useGameStore = defineStore('game', () => {
     setHint(
       dropped.gt(0)
         ? `回收 ${display.nameOf(node)}（背包满，丢弃 ${dropped.floor().toString()}）`
-        : `回收 ${display.nameOf(node)} → ${got}（${rate}% 原材料）`,
+        : `回收 ${display.nameOf(node)} → ${got}（${rate}% 返还）`,
     )
     return true
   }
